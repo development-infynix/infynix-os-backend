@@ -8,6 +8,7 @@ import { AuthorizationModule } from '@nestjs/authorization';
 import { DrizzleModule } from '@nestjs/drizzle';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { AuthModule } from './auth/auth.module.js';
+import { allowedOrigins } from './config/origins.js';
 import { pgPoolConfig } from './db/pg-config.js';
 import { HealthController } from './health/health.controller.js';
 import { MembersModule } from './members/members.module.js';
@@ -28,11 +29,8 @@ import { UsersModule } from './users/users.module.js';
         session: {
           absoluteTtl: config.get<Duration>('SESSION_ABSOLUTE_TTL', '7d'),
           idleTtl: config.get<Duration>('SESSION_IDLE_TTL', '1d'),
-          // The frontend runs on another origin than the API.
-          trustedOrigins: config
-            .get<string>('CORS_ORIGINS', 'http://localhost:5173')
-            .split(',')
-            .map((o) => o.trim()),
+          // The frontend runs on another origin than the API (see config/origins.ts).
+          trustedOrigins: allowedOrigins(config.get<string>('CORS_ORIGINS')),
           metadata: (request) => ({
             userAgent: request.headers['user-agent'],
             ip: request.ip,

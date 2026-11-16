@@ -7,6 +7,7 @@ import {
   type NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module.js';
+import { allowedOrigins } from './config/origins.js';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -18,11 +19,8 @@ async function bootstrap() {
   await app.register(helmet);
   app.setGlobalPrefix('api/v1');
   app.enableCors({
-    // Comma-separated list of allowed frontend origins, e.g. https://app.infynix.com
-    origin: config
-      .get<string>('CORS_ORIGINS', 'http://localhost:5173')
-      .split(',')
-      .map((o) => o.trim()),
+    // Exact frontend origins from CORS_ORIGINS (see config/origins.ts).
+    origin: allowedOrigins(config.get<string>('CORS_ORIGINS')),
     credentials: true,
     // @fastify/cors allows only GET/HEAD/POST by default; the API also edits
     // (PATCH), replaces (PUT) and deletes.
