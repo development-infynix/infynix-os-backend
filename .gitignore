@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+*.log
+.env
+!.env.example
+
+# Database CA certificates
+*.pem
+
+# Build and tool caches
+*.tsbuildinfo
+.impeccable

@@ -1,0 +1,375 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "141a1ffc-72d0-41d4-b142-fd0bb7737316",
+  "prevIds": [
+    "61cd11c9-6cb2-49a3-b10b-d480c1b12c5d"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_policy",
+      "statementTarget": [
+        "table",
+        "public",
+        "memberships"
+      ],
+      "writes": [
+        "s|pol|public.memberships.tenant_isolation",
+        "n|pol|public.memberships.tenant_isolation",
+        "e|pol|public.memberships.tenant_isolation"
+      ],
+      "reads": [
+        "n|tbl|public.memberships",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "memberships"
+      ],
+      "writes": [
+        "s|tbl|public.memberships",
+        "n|tbl|public.memberships",
+        "e|tbl|public.memberships",
+        "n|rel|public.memberships",
+        "n|type|public.memberships"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_rls",
+      "statementTarget": [
+        "table",
+        "public",
+        "users"
+      ],
+      "writes": [
+        "s|rls|public.users"
+      ],
+      "reads": [
+        "n|tbl|public.users",
+        "n|sch|public"
+      ],
+      "sqlHash": "ecbdd6712ef0fef0"
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "tenants",
+        "tenants_slug_key"
+      ],
+      "writes": [
+        "s|idx|public.tenants_slug_key",
+        "n|idx|public.tenants_slug_key",
+        "e|idx|public.tenants_slug_key",
+        "n|rel|public.tenants_slug_key"
+      ],
+      "reads": [
+        "n|tbl|public.tenants",
+        "n|sch|public",
+        "e|col|public.tenants.slug"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|public.tenants.slug"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "users",
+        "tenant_id"
+      ],
+      "writes": [
+        "s|col|public.users.tenant_id",
+        "n|col|public.users.tenant_id",
+        "e|col|public.users.tenant_id"
+      ],
+      "reads": [
+        "n|tbl|public.users",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "users",
+        "role"
+      ],
+      "writes": [
+        "s|col|public.users.role",
+        "n|col|public.users.role",
+        "e|col|public.users.role"
+      ],
+      "reads": [
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|enum|public.member_role"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "tenants",
+        "slug"
+      ],
+      "writes": [
+        "s|col|public.tenants.slug",
+        "n|col|public.tenants.slug",
+        "e|col|public.tenants.slug"
+      ],
+      "reads": [
+        "n|tbl|public.tenants",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "users",
+        "users_tenant_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.users_tenant_id_idx",
+        "n|idx|public.users_tenant_id_idx",
+        "e|idx|public.users_tenant_id_idx",
+        "n|rel|public.users_tenant_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.users.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "users"
+      ],
+      "writes": [
+        "s|fk|public.users.users_tenant_id_tenants_id_fkey",
+        "n|fk|public.users.users_tenant_id_tenants_id_fkey",
+        "e|fk|public.users.users_tenant_id_tenants_id_fkey",
+        "n|con|public.users.users_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|tbl|public.tenants",
+        "n|sch|public",
+        "n|col|public.users.tenant_id",
+        "n|col|public.tenants.id",
+        "e|uniqueness|public.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "public",
+        "users"
+      ],
+      "writes": [
+        "s|pol|public.users.tenant_isolation",
+        "n|pol|public.users.tenant_isolation",
+        "e|pol|public.users.tenant_isolation"
+      ],
+      "reads": [
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|role|infynix_tenant",
+        "e|rls|public.users"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "users",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "users",
+        "name": "role",
+        "type": "member_role",
+        "typeSchema": "public",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'staff'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "users",
+        "name": "users_tenant_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "users",
+        "name": "users_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "users",
+        "name": "tenant_isolation",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "infynix_tenant"
+        ],
+        "using": "\"users\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "withCheck": "\"users\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"memberships\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"tenant_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"user_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"role\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"is_active\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"invited_by\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"memberships\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"tenants\",\"slug\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"memberships_tenant_user_key\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"memberships_user_id_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"tenants_slug_key\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"memberships\",\"memberships_tenant_id_tenants_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"memberships\",\"memberships_user_id_users_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"memberships\",\"memberships_invited_by_users_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"memberships\",\"memberships_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "policies\u0000[\"public\",\"memberships\",\"tenant_isolation\"]"
+    },
+    {
+      "op": "alter",
+      "key": "tables\u0000[\"public\",\"users\"]",
+      "set": {
+        "isRlsEnabled": true
+      }
+    }
+  ]
+}

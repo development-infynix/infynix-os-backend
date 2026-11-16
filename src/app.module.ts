@@ -1,0 +1,59 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import {
+  AuthenticationModule,
+  type Duration,
+} from '@nestjs/authentication';
+import { AuthorizationModule } from '@nestjs/authorization';
+import { DrizzleModule } from '@nestjs/drizzle';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { AuthModule } from './auth/auth.module.js';
+import { pgPoolConfig } from './db/pg-config.js';
+import { HealthController } from './health/health.controller.js';
+import { MembersModule } from './members/members.module.js';
+import { ActorResolver } from './tenancy/actor.resolver.js';
+import { TenancyModule } from './tenancy/tenancy.module.js';
+import { UsersModule } from './users/users.module.js';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, cache: true }),
+    DrizzleModule.forRootAsync({
+      useFactory: () => ({ drizzle, connection: pgPoolConfig() }),
+    }),
+    // Authentication before authorization: the policy guard reads request.user.
+    AuthenticationModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        session: {
+          absoluteTtl: config.get<Duration>('SESSION_ABSOLUTE_TTL', '7d'),
+          idleTtl: config.get<Duration>('SESSION_IDLE_TTL', '1d'),
+          // The frontend runs on another origin than the API.
+          trustedOrigins: config
+            .get<string>('CORS_ORIGINS', 'http://localhost:5173')
+            .split(',')
+            .map((o) => o.trim()),
+          metadata: (request) => ({
+            userAgent: request.headers['user-agent'],
+            ip: request.ip,
+          }),
+        },
+      }),
+    }),
+    // Policies receive an Actor: the user plus, under /t/:tenant, that
+    // company and their membership in it (see ActorResolver).
+    AuthorizationModule.forRootAsync({
+      imports: [TenancyModule],
+      inject: [ActorResolver],
+      useFactory: (actors: ActorResolver) => ({
+        getUser: (context) => actors.resolve(context),
+      }),
+    }),
+    UsersModule,
+    TenancyModule,
+    MembersModule,
+    AuthModule,
+  ],
+  controllers: [HealthController],
+})
+export class AppModule {}

@@ -1,0 +1,121 @@
+import { sql } from 'drizzle-orm';
+import {
+  type AnyPgColumn,
+  boolean,
+  index,
+  jsonb,
+  pgEnum,
+  pgPolicy,
+  pgRole,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
+
+const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
+
+/* ── Tenancy primitives ─────────────────────────────────────────────────── */
+
+/** Roles a person can hold inside one company, highest first. */
+export const MEMBER_ROLES = ['owner', 'manager', 'staff'] as const;
+export const memberRole = pgEnum('member_role', MEMBER_ROLES);
+
+export const TENANT_STATUSES = ['active', 'suspended'] as const;
+export const tenantStatus = pgEnum('tenant_status', TENANT_STATUSES);
+
+/**
+ * The restricted database role every company-scoped query runs as
+ * (`SET LOCAL ROLE`, see TenantDb). It can't log in and doesn't bypass
+ * row-level security, unlike the connection's owner role.
+ */
+export const tenantRole = pgRole('infynix_tenant');
+
+/** Rows of a company-owned table are visible only inside that company's transaction. */
+const currentTenant = sql`(nullif(current_setting('app.tenant_id', true), ''))::uuid`;
+const tenantIsolation = (tenantId: AnyPgColumn) =>
+  pgPolicy('tenant_isolation', {
+    as: 'permissive',
+    for: 'all',
+    to: tenantRole,
+    using: sql`${tenantId} = ${currentTenant}`,
+    withCheck: sql`${tenantId} = ${currentTenant}`,
+  });
+
+/* ── Global tables (no tenant) ──────────────────────────────────────────── */
+
+/** A person: one login, in exactly one company, with one role there. */
+export const users = pgTable.withRLS(
+  'users',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    /** Stored lowercased; the unique index on lower(email) backs that up. */
+    email: text().notNull(),
+    passwordHash: text('password_hash').notNull(),
+    fullName: text('full_name').notNull(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    role: memberRole().notNull().default('staff'),
+    /** Infynix staff: can see and suspend any company. */
+    isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
+    /** Deactivated people can't sign in and lose their sessions. */
+    isActive: boolean('is_active').notNull().default(true),
+    emailVerified: boolean('email_verified').notNull().default(false),
+    lastLoginAt: timestamptz('last_login_at'),
+    passwordChangedAt: timestamptz('password_changed_at')
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('users_email_lower_key').on(sql`lower(${t.email})`),
+    index('users_tenant_id_idx').on(t.tenantId),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+/** A client company, created by self-serve sign-up. */
+export const tenants = pgTable('tenants', {
+  id: uuid().primaryKey().defaultRandom(),
+  name: text().notNull(),
+  status: tenantStatus().notNull().default('active'),
+  /** Reserved for billing; every company is on `free` for now. */
+  plan: text().notNull().default('free'),
+  createdBy: uuid('created_by').references((): AnyPgColumn => users.id, {
+    onDelete: 'set null',
+  }),
+  createdAt: timestamptz('created_at').notNull().defaultNow(),
+  updatedAt: timestamptz('updated_at')
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+/**
+ * Server-side sessions for @nestjs/authentication. A session belongs to a
+ * person; their company is on the users row.
+ */
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: text().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamptz('created_at').notNull(),
+    expiresAt: timestamptz('expires_at').notNull(),
+    lastActiveAt: timestamptz('last_active_at').notNull(),
+    mfa: text(),
+    metadata: jsonb().$type<Record<string, unknown>>(),
+  },
+  (t) => [
+    index('sessions_user_id_idx').on(t.userId),
+    index('sessions_expires_at_idx').on(t.expiresAt),
+  ],
+);
