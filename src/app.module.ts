@@ -9,6 +9,7 @@ import { DrizzleModule } from '@nestjs/drizzle';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { AccessModule } from './access/access.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { ClientsModule } from './clients/clients.module.js';
 import { allowedOrigins } from './config/origins.js';
 import { pgPoolConfig } from './db/pg-config.js';
 import { HealthController } from './health/health.controller.js';
@@ -52,6 +53,7 @@ import { UsersModule } from './users/users.module.js';
     TenancyModule,
     AccessModule,
     MembersModule,
+    ClientsModule,
     AuthModule,
   ],
   controllers: [HealthController],

@@ -1,0 +1,63 @@
+import { Can } from '@nestjs/authorization';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { CurrentActor } from '../tenancy/actor.resolver.js';
+import type { Actor } from '../tenancy/tenancy.types.js';
+import { ClientPolicy } from './client.policy.js';
+import { ClientsService } from './clients.service.js';
+import {
+  CreateClientDto,
+  ListClientsQuery,
+  UpdateClientDto,
+} from './dto/clients.dto.js';
+
+/** Admin › Clients: /api/v1/clients, guarded by the clients menu grant. */
+@Controller('clients')
+export class ClientsController {
+  constructor(private readonly clients: ClientsService) {}
+
+  @Get()
+  @Can(ClientPolicy, 'use')
+  list(@CurrentActor() actor: Actor, @Query() query: ListClientsQuery) {
+    return this.clients.list(actor, query.page, query.pageSize, query.q);
+  }
+
+  @Get(':id')
+  @Can(ClientPolicy, 'use')
+  get(@CurrentActor() actor: Actor, @Param('id', ParseUUIDPipe) id: string) {
+    return this.clients.get(actor, id);
+  }
+
+  @Post()
+  @Can(ClientPolicy, 'use')
+  create(@CurrentActor() actor: Actor, @Body() dto: CreateClientDto) {
+    return this.clients.create(actor, dto);
+  }
+
+  @Patch(':id')
+  @Can(ClientPolicy, 'use')
+  update(
+    @CurrentActor() actor: Actor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateClientDto,
+  ) {
+    return this.clients.update(actor, id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @Can(ClientPolicy, 'use')
+  async remove(@CurrentActor() actor: Actor, @Param('id', ParseUUIDPipe) id: string) {
+    await this.clients.remove(actor, id);
+  }
+}

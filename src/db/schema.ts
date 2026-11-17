@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -182,5 +183,39 @@ export const sessions = pgTable(
   (t) => [
     index('sessions_user_id_idx').on(t.userId),
     index('sessions_expires_at_idx').on(t.expiresAt),
+  ],
+);
+
+/* ── Company-owned records ────────────────────────────────────────────────── */
+
+/** A customer of the company, with the contact details the frontend collects. */
+export const clients = pgTable.withRLS(
+  'clients',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    email: text(),
+    phone: text(),
+    customDetails: jsonb('custom_details')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('clients_tenant_id_idx').on(t.tenantId),
+    check('clients_name_not_blank', sql`length(btrim(${t.name})) > 0`),
+    check(
+      'clients_contact_required',
+      sql`${t.email} is not null or ${t.phone} is not null`,
+    ),
+    tenantIsolation(t.tenantId),
   ],
 );
