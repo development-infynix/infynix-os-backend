@@ -188,6 +188,45 @@ export const sessions = pgTable(
 
 /* ── Company-owned records ────────────────────────────────────────────────── */
 
+/** One normalized spreadsheet row kept with the import it came from. */
+export interface ClientImportRow {
+  name: string;
+  email: string | null;
+  phone: string | null;
+  customDetails: Record<string, unknown>;
+}
+
+/**
+ * A client import started in the UI. The raw rows are appended as the
+ * frontend uploads chunks; counts are incremented for accepted/rejected rows.
+ */
+export const clientImports = pgTable.withRLS(
+  'client_imports',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    fileName: text('file_name').notNull(),
+    rowCount: integer('row_count').notNull(),
+    createdCount: integer('created_count').notNull().default(0),
+    skippedCount: integer('skipped_count').notNull().default(0),
+    rows: jsonb('rows').$type<ClientImportRow[]>().notNull().default([]),
+    createdBy: uuid('created_by').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('client_imports_tenant_id_idx').on(t.tenantId),
+    check('client_imports_row_count_max', sql`${t.rowCount} <= 500`),
+    check('client_imports_name_not_blank', sql`length(btrim(${t.name})) > 0`),
+    check('client_imports_file_name_not_blank', sql`length(btrim(${t.fileName})) > 0`),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
 /** A customer of the company, with the contact details the frontend collects. */
 export const clients = pgTable.withRLS(
   'clients',
@@ -199,6 +238,10 @@ export const clients = pgTable.withRLS(
     name: text().notNull(),
     email: text(),
     phone: text(),
+    /** Null for clients created before imports or added one by one. */
+    importId: uuid('import_id').references((): AnyPgColumn => clientImports.id, {
+      onDelete: 'set null',
+    }),
     customDetails: jsonb('custom_details')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -211,6 +254,7 @@ export const clients = pgTable.withRLS(
   },
   (t) => [
     index('clients_tenant_id_idx').on(t.tenantId),
+    index('clients_import_id_idx').on(t.importId),
     check('clients_name_not_blank', sql`length(btrim(${t.name})) > 0`),
     check(
       'clients_contact_required',

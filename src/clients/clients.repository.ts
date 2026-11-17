@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { count, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
 import { clients } from '../db/schema.js';
 
@@ -10,6 +10,7 @@ export interface Client {
   name: string;
   email: string | null;
   phone: string | null;
+  importId: string | null;
   customDetails: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
@@ -20,6 +21,7 @@ export interface CreateClientData {
   name: string;
   email: string | null;
   phone: string | null;
+  importId?: string | null;
   customDetails: Record<string, unknown>;
 }
 
@@ -36,6 +38,7 @@ const clientColumns = {
   name: clients.name,
   email: clients.email,
   phone: clients.phone,
+  importId: clients.importId,
   customDetails: clients.customDetails,
   createdAt: clients.createdAt,
   updatedAt: clients.updatedAt,
@@ -55,17 +58,22 @@ export class ClientsRepository {
     page: number,
     pageSize: number,
     q?: string,
+    importId?: string,
   ): Promise<{ items: Client[]; total: number }> {
-    let where: SQL | undefined;
+    const conditions: SQL[] = [];
     if (q) {
       const term = q.replace(/[\\%_]/g, (ch) => `\\${ch}`);
       const contains = `%${term}%`;
-      where = or(
-        ilike(clients.name, contains),
-        ilike(clients.email, contains),
-        ilike(clients.phone, contains),
+      conditions.push(
+        or(
+          ilike(clients.name, contains),
+          ilike(clients.email, contains),
+          ilike(clients.phone, contains),
+        )!,
       );
     }
+    if (importId) conditions.push(eq(clients.importId, importId));
+    const where = and(...conditions);
 
     const [items, [{ total }]] = await Promise.all([
       tx

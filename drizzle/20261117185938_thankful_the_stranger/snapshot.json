@@ -1,0 +1,530 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "67ea8609-0412-4210-bcc2-333cdab631f2",
+  "prevIds": [
+    "b891a856-4cc4-4363-9edd-6bb95e099f36"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "client_imports"
+      ],
+      "writes": [
+        "s|tbl|public.client_imports",
+        "n|tbl|public.client_imports",
+        "e|tbl|public.client_imports",
+        "n|rel|public.client_imports",
+        "n|type|public.client_imports",
+        "n|rel|public.client_imports_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "clients",
+        "import_id"
+      ],
+      "writes": [
+        "s|col|public.clients.import_id",
+        "n|col|public.clients.import_id",
+        "e|col|public.clients.import_id"
+      ],
+      "reads": [
+        "n|tbl|public.clients",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "client_imports",
+        "client_imports_tenant_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.client_imports_tenant_id_idx",
+        "n|idx|public.client_imports_tenant_id_idx",
+        "e|idx|public.client_imports_tenant_id_idx",
+        "n|rel|public.client_imports_tenant_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.client_imports",
+        "n|sch|public",
+        "n|col|public.client_imports.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "clients",
+        "clients_import_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.clients_import_id_idx",
+        "n|idx|public.clients_import_id_idx",
+        "e|idx|public.clients_import_id_idx",
+        "n|rel|public.clients_import_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.clients",
+        "n|sch|public",
+        "n|col|public.clients.import_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "client_imports"
+      ],
+      "writes": [
+        "s|fk|public.client_imports.client_imports_tenant_id_tenants_id_fkey",
+        "n|fk|public.client_imports.client_imports_tenant_id_tenants_id_fkey",
+        "e|fk|public.client_imports.client_imports_tenant_id_tenants_id_fkey",
+        "n|con|public.client_imports.client_imports_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.client_imports",
+        "n|sch|public",
+        "n|tbl|public.tenants",
+        "n|sch|public",
+        "n|col|public.client_imports.tenant_id",
+        "n|col|public.tenants.id",
+        "e|uniqueness|public.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "client_imports"
+      ],
+      "writes": [
+        "s|fk|public.client_imports.client_imports_created_by_users_id_fkey",
+        "n|fk|public.client_imports.client_imports_created_by_users_id_fkey",
+        "e|fk|public.client_imports.client_imports_created_by_users_id_fkey",
+        "n|con|public.client_imports.client_imports_created_by_users_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.client_imports",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.client_imports.created_by",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "clients"
+      ],
+      "writes": [
+        "s|fk|public.clients.clients_import_id_client_imports_id_fkey",
+        "n|fk|public.clients.clients_import_id_client_imports_id_fkey",
+        "e|fk|public.clients.clients_import_id_client_imports_id_fkey",
+        "n|con|public.clients.clients_import_id_client_imports_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.clients",
+        "n|sch|public",
+        "n|tbl|public.client_imports",
+        "n|sch|public",
+        "n|col|public.clients.import_id",
+        "n|col|public.client_imports.id",
+        "e|uniqueness|public.client_imports.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "public",
+        "client_imports"
+      ],
+      "writes": [
+        "s|pol|public.client_imports.tenant_isolation",
+        "n|pol|public.client_imports.tenant_isolation",
+        "e|pol|public.client_imports.tenant_isolation"
+      ],
+      "reads": [
+        "n|tbl|public.client_imports",
+        "n|sch|public",
+        "n|role|infynix_tenant",
+        "e|rls|public.client_imports"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "client_imports",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "file_name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "row_count",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "created_count",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "skipped_count",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "rows",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "created_by",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "clients",
+        "name": "import_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "client_imports_tenant_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "clients",
+        "name": "clients_import_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "import_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "client_imports_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "client_imports_created_by_users_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "created_by"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "clients",
+        "name": "clients_import_id_client_imports_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "import_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "client_imports",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "client_imports_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "client_imports_row_count_max",
+        "value": "\"row_count\" <= 500",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "client_imports_name_not_blank",
+        "value": "length(btrim(\"name\")) > 0",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "client_imports_file_name_not_blank",
+        "value": "length(btrim(\"file_name\")) > 0",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "client_imports",
+        "name": "tenant_isolation",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "infynix_tenant"
+        ],
+        "using": "\"client_imports\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "withCheck": "\"client_imports\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

@@ -30,7 +30,7 @@ export class ClientsController {
   @Get()
   @Can(ClientPolicy, 'use')
   list(@CurrentActor() actor: Actor, @Query() query: ListClientsQuery) {
-    return this.clients.list(actor, query.page, query.pageSize, query.q);
+    return this.clients.list(actor, query.page, query.pageSize, query.q, query.importId);
   }
 
   @Get(':id')
@@ -43,7 +43,7 @@ export class ClientsController {
   @Post('import')
   @Can(ClientPolicy, 'use')
   importChunk(@CurrentActor() actor: Actor, @Body() dto: ImportClientsDto) {
-    return this.clients.importChunk(actor, dto.clients);
+    return this.clients.importChunk(actor, dto);
   }
 
   @Post()

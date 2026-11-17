@@ -3,16 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { ClientImportRow } from '../db/schema.js';
 import type { TenantTx } from '../db/tenant-db.js';
 import { TenantDb } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
+import { ClientImportsRepository } from './client-imports.repository.js';
 import {
   type Client,
   ClientsRepository,
 } from './clients.repository.js';
 import type {
   CreateClientDto,
-  ImportClientRowDto,
+  ImportClientsDto,
   UpdateClientDto,
 } from './dto/clients.dto.js';
 
@@ -37,12 +39,13 @@ export class ClientsService {
   constructor(
     private readonly tenantDb: TenantDb,
     private readonly clients: ClientsRepository,
+    private readonly imports: ClientImportsRepository,
   ) {}
 
   /** One page of the company's clients, with what the table footer needs. */
-  async list(actor: Actor, page: number, pageSize: number, q?: string) {
+  async list(actor: Actor, page: number, pageSize: number, q?: string, importId?: string) {
     const { items, total } = await this.tenantDb.run(actor.tenant.id, (tx) =>
-      this.clients.page(tx, page, pageSize, q),
+      this.clients.page(tx, page, pageSize, q, importId),
     );
     return { items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
@@ -85,21 +88,36 @@ export class ClientsService {
     });
   }
 
-  /** One import chunk: valid rows are created, unusable rows are counted as skipped. */
-  async importChunk(actor: Actor, rows: ImportClientRowDto[]) {
+  /**
+   * One chunk of a registered import: the import must belong to this company,
+   * valid rows become clients with `importId` set, and unusable rows are
+   * skipped. The raw payload and both counters are recorded in one statement.
+   */
+  async importChunk(actor: Actor, dto: ImportClientsDto) {
     let created = 0;
     let skipped = 0;
+    const storedRows: ClientImportRow[] = [];
     await this.tenantDb.run(actor.tenant.id, async (tx) => {
-      for (const row of rows) {
+      const rowImport = await this.imports.find(tx, dto.importId);
+      if (!rowImport) throw new NotFoundException('Import not found');
+
+      for (const row of dto.clients) {
         const name = row.name?.trim();
         const email = normalizeContact(row.email);
         const phone = normalizeContact(row.phone);
+        storedRows.push({
+          name: name ?? '',
+          email,
+          phone,
+          customDetails: { ...row.customDetails },
+        });
         if (!name || (!email && !phone) || (email && !EMAIL_RE.test(email))) {
           skipped += 1;
           continue;
         }
         await this.clients.create(tx, {
           tenantId: actor.tenant.id,
+          importId: rowImport.id,
           name,
           email,
           phone,
@@ -107,6 +125,7 @@ export class ClientsService {
         });
         created += 1;
       }
+      await this.imports.recordChunk(tx, rowImport.id, created, skipped, storedRows);
     });
     return { created, skipped };
   }

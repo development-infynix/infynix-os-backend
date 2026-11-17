@@ -38,6 +38,7 @@ Clients are **not** copied into a global catalogue: each company has its own row
 | `name` | `text` | required, trimmed, 1–120 chars |
 | `email` | `text` | nullable, trimmed and lowercased, valid email, max 254 |
 | `phone` | `text` | nullable, trimmed, max 50 |
+| `import_id` | `uuid` | nullable FK `client_imports.id`, `ON DELETE SET NULL`; set on imported clients |
 | `custom_details` | `jsonb` | not null, default `{}`, `Record<string, unknown>` in TypeScript |
 | `created_at` | `timestamptz` | default `now()` |
 | `updated_at` | `timestamptz` | default `now()`, refreshed on update |
@@ -50,6 +51,23 @@ Checks and indexes:
 - RLS policy `tenant_isolation` for `infynix_tenant`, plus `GRANT SELECT, INSERT, UPDATE, DELETE`
 
 The API normalises blank optional contact values to `null`, so an empty string never reaches the database check.
+
+### `client_imports` — one batch per spreadsheet
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | primary key |
+| `tenant_id` | `uuid` | FK `tenants.id`, `ON DELETE CASCADE` |
+| `name` | `text` | user-supplied import name, 1–120 chars |
+| `file_name` | `text` | original spreadsheet filename |
+| `row_count` | `integer` | data rows in the file, capped at 500 |
+| `created_count` | `integer` | clients created so far |
+| `skipped_count` | `integer` | rows skipped so far |
+| `rows` | `jsonb` | array of normalized rows as they were imported |
+| `created_by` | `uuid` | FK `users.id`, `ON DELETE SET NULL` |
+| `created_at` | `timestamptz` | default `now()` |
+
+RLS and grants match `clients`. Counts are incremented atomically per chunk, and `import_id` on `clients` points back to the batch. Import records keep the raw rows even if a client is later edited or deleted.
 
 ---
 
@@ -64,7 +82,7 @@ The API normalises blank optional contact values to `null`, so an empty string n
 
 ## 4. API
 
-All routes are under `/api/v1/clients` and guarded by `ClientPolicy.use`:
+Routes are under `/api/v1/clients` and `/api/v1/client-imports`, all guarded by `ClientPolicy.use`:
 
 - Owners always pass.
 - Managers and staff pass only when their session grants include the `clients` menu key.
@@ -73,10 +91,13 @@ Hiding the menu therefore also closes the endpoints; this is the first module wh
 
 | Method | Path | Body / query | Response |
 |---|---|---|---|
-| `GET` | `/clients` | `page` (default 1), `pageSize` (default 100, max 100), `q` (optional search) | `{ items, total, page, pageSize, totalPages }` |
+| `GET` | `/clients` | `page` (default 1), `pageSize` (default 100, max 100), `q` (optional search), `importId` (optional) | `{ items, total, page, pageSize, totalPages }` |
 | `GET` | `/clients/:id` | — | one `Client`, 404 when missing |
-| `POST` | `/clients/import` | `{ clients: ClientInput[] }`, max 100 rows | `{ created, skipped }`, 201 |
+| `POST` | `/clients/import` | `{ importId, clients: ClientInput[] }`, max 100 rows | `{ created, skipped }`, 201 |
 | `POST` | `/clients` | `{ name, email?, phone?, customDetails? }` | created `Client`, 201 |
+| `POST` | `/client-imports` | `{ name, fileName, rowCount }` | import summary with `id`, 201 |
+| `GET` | `/client-imports` | — | newest import summaries |
+| `GET` | `/client-imports/:id` | — | summary plus stored `rows` |
 | `PATCH` | `/clients/:id` | any subset of the create fields | updated `Client` |
 | `DELETE` | `/clients/:id` | — | 204 |
 
@@ -92,6 +113,7 @@ Backend files:
 - `src/clients/clients.controller.ts` — HTTP routes
 - `src/clients/clients.module.ts` — registration in `AppModule`
 - `src/clients/clients.service.spec.ts` — contact validation and custom details
+- `src/clients/client-imports.*` — import records, summaries, stored rows, chunk counters
 
 ---
 
@@ -104,7 +126,9 @@ Backend files:
 - `addClient`, `updateClient`, `removeClient`
 - `detailsToRows` / `rowsToDetails` convert between the JSON object and the key/value editor
 
-Route: `src/routes/_authed/clients.tsx` keeps `?page=` and `?q=` in the URL, prefetches the first page, and keeps the existing `requireAccess(session, 'clients')` guard.
+The page has **Clients** and **Imports** tabs styled as the recessed segmented control. The Add client button stays available on both tabs. Route: `src/routes/_authed/clients.tsx` keeps `?page=`, `?q=` and `?importId=` in the URL. Switching the funnel filter updates `importId`, and the route loader prefetches that filtered page from the server before the component renders. The existing `requireAccess(session, 'clients')` guard stays in place.
+
+On the Imports tab, **View rows** switches to Clients with that import's `importId` selected in the funnel filter. The funnel dropdown offers **All clients** plus one option per import, and `GET /clients` accepts the same `importId` filter.
 
 Screens:
 
@@ -112,6 +136,7 @@ Screens:
 - `src/clients/components/SearchClientsDialog.tsx` — debounced search by name, email or phone; arrow keys and Enter
 - `src/clients/components/AddClientDialog.tsx` — form entry point from the **Add client** dropdown
 - `src/clients/components/ClientImportModal.tsx` — four-step Excel/CSV import wizard
+- `src/clients/components/ClientImportsPanel.tsx` — import cards on the Imports tab
 - `src/clients/components/ClientDetailsDrawer.tsx` — view, edit and delete
 - `src/clients/components/CustomDetailsEditor.tsx` — key/value rows
 
@@ -128,9 +153,9 @@ Each row is `key`, `value`, then one action button. Only the last row shows `+`;
 1. **Upload file** — `.xlsx`, `.xls` or `.csv`; the first row is read as column headings.
 2. **Match fields** — choose which columns hold name, email and phone. Name plus at least one contact column is required; common headings are pre-selected.
 3. **Select fields** — pick remaining columns to keep as custom details.
-4. **Preview** — see the first five mapped rows before importing.
+4. **Preview** — name the import, then see the first five mapped rows before importing.
 
-Importing splits valid rows into chunks of 100 and posts each chunk to `POST /clients/import`. During the import the stepper becomes a progress bar; the submit button reads “Importing…”. The server counts rows with no name/contact or an invalid email as skipped. `CLIENTS_KEY` is invalidated when all chunks finish.
+Submitting first creates a `client_imports` record with the chosen name and file details, then splits valid rows into chunks of 100 and posts each chunk to `POST /clients/import` with that `importId`. Each created client stores the same `import_id`. During the import the stepper becomes a progress bar; the submit button reads “Importing…”. The server counts rows with no name/contact or an invalid email as skipped and increments the import counters atomically. Both `CLIENTS_KEY` and `CLIENT_IMPORTS_KEY` are invalidated when all chunks finish.
 
 ### Mobile layout
 
@@ -141,6 +166,6 @@ Users and Clients share the same mobile pattern: the toolbar is a 52px sticky su
 ## 6. What is not in this slice
 
 - No links from CRM, sales, payments or invoices to clients yet — those modules are still empty states.
-- Imports are chunked by the client at 100 rows per `POST /clients/import`; there is no single atomic bulk import for all 500 rows.
+- Imports are chunked by the client at 100 rows per `POST /clients/import`; there is no single atomic bulk import for all 500 rows, and a failed chunk leaves earlier chunks committed.
 - No `action`-kind permission for creating or deleting clients; the `clients` menu grant currently covers all client endpoints.
 - No duplicate detection on email or phone; two clients may share a contact method.

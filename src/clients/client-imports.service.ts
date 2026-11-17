@@ -1,0 +1,39 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { TenantDb } from '../db/tenant-db.js';
+import type { Actor } from '../tenancy/tenancy.types.js';
+import type { ClientImport, ClientImportSummary } from './client-imports.repository.js';
+import { ClientImportsRepository } from './client-imports.repository.js';
+import type { CreateClientImportDto } from './dto/client-imports.dto.js';
+
+/** Import records inside the actor's own company (all through TenantDb). */
+@Injectable()
+export class ClientImportsService {
+  constructor(
+    private readonly tenantDb: TenantDb,
+    private readonly imports: ClientImportsRepository,
+  ) {}
+
+  create(actor: Actor, dto: CreateClientImportDto): Promise<ClientImportSummary> {
+    return this.tenantDb.run(actor.tenant.id, (tx) =>
+      this.imports.create(tx, {
+        tenantId: actor.tenant.id,
+        name: dto.name,
+        fileName: dto.fileName,
+        rowCount: dto.rowCount,
+        createdBy: actor.user.id,
+      }),
+    );
+  }
+
+  list(actor: Actor): Promise<ClientImportSummary[]> {
+    return this.tenantDb.run(actor.tenant.id, (tx) => this.imports.list(tx));
+  }
+
+  async get(actor: Actor, id: string): Promise<ClientImport> {
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const row = await this.imports.find(tx, id);
+      if (!row) throw new NotFoundException('Import not found');
+      return row;
+    });
+  }
+}

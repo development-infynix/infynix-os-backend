@@ -1,5 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ClientImport, ClientImportsRepository } from './client-imports.repository.js';
 import type { TenantDb, TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import type { Client, ClientsRepository } from './clients.repository.js';
@@ -34,6 +35,7 @@ const client = (overrides: Partial<Client> = {}): Client => ({
   name: 'Acme',
   email: 'old@acme.test',
   phone: null,
+  importId: null,
   customDetails: { tier: 'gold' },
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -59,6 +61,18 @@ describe('ClientsService', () => {
   const create = vi.fn<ClientsRepository['create']>();
   const update = vi.fn<ClientsRepository['update']>();
   const remove = vi.fn<ClientsRepository['remove']>();
+  const findImport = vi.fn<ClientImportsRepository['find']>();
+  const recordChunk = vi.fn<ClientImportsRepository['recordChunk']>();
+  const importRow: ClientImport = {
+    id: 'i1',
+    name: 'Contacts',
+    fileName: 'contacts.csv',
+    rowCount: 3,
+    createdCount: 0,
+    skippedCount: 0,
+    createdAt: new Date(),
+    rows: [],
+  };
   const run = vi.fn(
     (_tenantId: string, fn: (tx: TenantTx) => Promise<unknown>) => fn(tx),
   );
@@ -66,9 +80,12 @@ describe('ClientsService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    findImport.mockResolvedValue(importRow);
+    recordChunk.mockResolvedValue(undefined);
     service = new ClientsService(
       { run } as unknown as TenantDb,
       { find, create, update, remove } as unknown as ClientsRepository,
+      { find: findImport, recordChunk } as unknown as ClientImportsRepository,
     );
   });
 
@@ -108,20 +125,46 @@ describe('ClientsService', () => {
     });
   });
 
-  it('imports valid rows from a chunk and skips unusable ones', async () => {
+  it('imports valid rows from a chunk, skips unusable ones and updates the import', async () => {
     create.mockResolvedValue(client());
     const rows = [
-      { name: 'Good', email: 'A@B.CO' },
+      { name: 'Good', email: 'A@B.CO', customDetails: { tier: 'gold' } },
       { name: 'No contact' },
       { name: 'Bad email', email: 'not-an-email' },
     ] as ImportClientRowDto[];
 
-    await expect(service.importChunk(actor, rows)).resolves.toEqual({ created: 1, skipped: 2 });
+    await expect(service.importChunk(actor, { importId: 'i1', clients: rows })).resolves.toEqual({
+      created: 1,
+      skipped: 2,
+    });
+    expect(findImport).toHaveBeenCalledWith(tx, 'i1');
     expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(
       tx,
-      expect.objectContaining({ tenantId: 't1', email: 'A@B.CO', name: 'Good' }),
+      expect.objectContaining({
+        tenantId: 't1',
+        importId: 'i1',
+        email: 'A@B.CO',
+        name: 'Good',
+        customDetails: { tier: 'gold' },
+      }),
     );
+    expect(recordChunk).toHaveBeenCalledWith(tx, 'i1', 1, 2, [
+      { name: 'Good', email: 'A@B.CO', phone: null, customDetails: { tier: 'gold' } },
+      { name: 'No contact', email: null, phone: null, customDetails: {} },
+      { name: 'Bad email', email: 'not-an-email', phone: null, customDetails: {} },
+    ]);
+  });
+
+  it('rejects a chunk whose import is not in the actor tenant', async () => {
+    findImport.mockResolvedValue(null);
+    const rows = [{ name: 'Good', email: 'a@b.co' }] as ImportClientRowDto[];
+
+    await expect(service.importChunk(actor, { importId: 'missing', clients: rows })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(recordChunk).not.toHaveBeenCalled();
   });
 
   it('rejects an update that would remove the last contact method', async () => {

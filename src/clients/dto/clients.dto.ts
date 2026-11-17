@@ -8,6 +8,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Max,
   MaxLength,
@@ -114,14 +115,19 @@ export class ListClientsQuery {
   @IsString()
   @MaxLength(100)
   q?: string;
+
+  @IsOptional()
+  @IsUUID()
+  importId?: string;
 }
 
-/** One row from a spreadsheet. Bad contact values are skipped by the service. */
+/** One row from a spreadsheet. Blank names and bad contacts are skipped by the service. */
 export class ImportClientRowDto {
+  @IsOptional()
   @Transform(trim)
   @IsString()
-  @Length(1, 120)
-  name: string;
+  @MaxLength(120)
+  name?: string;
 
   @IsOptional()
   @Transform(trimLower)
@@ -142,6 +148,9 @@ export class ImportClientRowDto {
 
 /** At most one chunk of 100 rows per request; the frontend sends chunks in order. */
 export class ImportClientsDto {
+  @IsUUID()
+  importId: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)
