@@ -7,6 +7,7 @@ import {
   AddMemberDto,
   ListMembersQuery,
   SearchMembersQuery,
+  SetMemberAccessDto,
   SetMemberPasswordDto,
   UpdateMemberDto,
 } from './dto/members.dto.js';
@@ -28,6 +29,24 @@ export class MembersController {
   @Can(TenantPolicy, 'administer')
   search(@CurrentActor() actor: Actor, @Query() query: SearchMembersQuery) {
     return this.members.search(actor, query.q, query.limit);
+  }
+
+  /** The menus this person may use, and the full list to choose from. */
+  @Get(':id/access')
+  @Can(TenantPolicy, 'administer')
+  getAccess(@CurrentActor() actor: Actor, @Param('id', ParseUUIDPipe) id: string) {
+    return this.members.getAccess(actor, id);
+  }
+
+  /** Replaces their menus with `accessKeys`; an empty list removes all. */
+  @Put(':id/access')
+  @Can(TenantPolicy, 'administer')
+  setAccess(
+    @CurrentActor() actor: Actor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetMemberAccessDto,
+  ) {
+    return this.members.setAccess(actor, id, dto.accessKeys);
   }
 
   @Get(':id')

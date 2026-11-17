@@ -3,6 +3,7 @@ import {
   type AnyPgColumn,
   boolean,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgPolicy,
@@ -24,6 +25,13 @@ export const memberRole = pgEnum('member_role', MEMBER_ROLES);
 
 export const TENANT_STATUSES = ['active', 'suspended'] as const;
 export const tenantStatus = pgEnum('tenant_status', TENANT_STATUSES);
+
+/**
+ * Menu items are access items; future capabilities (creating a client,
+ * exporting an invoice) join the same list as `action` items.
+ */
+export const ACCESS_KINDS = ['menu', 'action'] as const;
+export const accessKind = pgEnum('access_kind', ACCESS_KINDS);
 
 /**
  * The restricted database role every company-scoped query runs as
@@ -96,6 +104,63 @@ export const tenants = pgTable('tenants', {
     .defaultNow()
     .$onUpdate(() => new Date()),
 });
+
+/**
+ * Everything a person can be granted: the sidebar menus today, and other
+ * capabilities later (`kind = 'action'`). The list is global on purpose:
+ * every company sees the same menus, only the grants differ.
+ */
+export const accessItems = pgTable(
+  'access_items',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    /** Stable identifier used by the API and the frontend (`clients`, `crm`, ...). */
+    key: text().notNull(),
+    label: text().notNull(),
+    kind: accessKind().notNull().default('menu'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('access_items_key_key').on(t.key),
+    index('access_items_kind_sort_idx').on(t.kind, t.sortOrder),
+  ],
+);
+
+/**
+ * A grant: this person may use this access item. Absence means no access.
+ * Owners are implicit (they get everything without rows, see AccessService).
+ */
+export const userAccess = pgTable.withRLS(
+  'user_access',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accessItemId: uuid('access_item_id')
+      .notNull()
+      .references(() => accessItems.id, { onDelete: 'cascade' }),
+    grantedBy: uuid('granted_by').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
+    grantedAt: timestamptz('granted_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('user_access_user_item_key').on(t.userId, t.accessItemId),
+    index('user_access_tenant_idx').on(t.tenantId),
+    index('user_access_user_idx').on(t.userId),
+    tenantIsolation(t.tenantId),
+  ],
+);
 
 /**
  * Server-side sessions for @nestjs/authentication. A session belongs to a

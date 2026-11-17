@@ -1,5 +1,19 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEmail, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
+  IsBoolean,
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { IsStrongPassword } from '../../auth/password-policy.js';
 import type { MemberRole } from '../../tenancy/tenancy.types.js';
 
@@ -54,6 +68,16 @@ export class UpdateMemberDto {
 export class SetMemberPasswordDto {
   @IsStrongPassword()
   password: string;
+}
+
+/** The complete set of menus a person should have; empty means none. */
+export class SetMemberAccessDto {
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @Length(1, 80, { each: true })
+  accessKeys: string[];
 }
 
 /** ?page=1&pageSize=50: one page of the company's users, newest page last. */

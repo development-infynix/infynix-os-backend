@@ -7,6 +7,7 @@ import {
 import { AuthorizationModule } from '@nestjs/authorization';
 import { DrizzleModule } from '@nestjs/drizzle';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { AccessModule } from './access/access.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { allowedOrigins } from './config/origins.js';
 import { pgPoolConfig } from './db/pg-config.js';
@@ -49,6 +50,7 @@ import { UsersModule } from './users/users.module.js';
     }),
     UsersModule,
     TenancyModule,
+    AccessModule,
     MembersModule,
     AuthModule,
   ],

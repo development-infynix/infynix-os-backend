@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PasswordHasher, SessionService } from '@nestjs/authentication';
+import { AccessService } from '../access/access.service.js';
 import { TenantDb, type TenantTx } from '../db/tenant-db.js';
 import { TenantPolicy } from '../tenancy/tenant.policy.js';
 import type { Actor, MemberRole } from '../tenancy/tenancy.types.js';
@@ -25,6 +26,7 @@ export class MembersService {
     private readonly members: MembersRepository,
     private readonly hasher: PasswordHasher,
     private readonly sessions: SessionService,
+    private readonly access: AccessService,
   ) {}
 
   /** Users of the company matching a search (name or email). */
@@ -44,6 +46,39 @@ export class MembersService {
       this.members.page(tx, page, pageSize),
     );
     return { items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  /**
+   * The menus one person may use. The owner holds every menu implicitly, so
+   * their list is the full access list even though `user_access` has no rows.
+   */
+  async getAccess(actor: Actor, id: string) {
+    const items = await this.access.menuItems();
+    const accessKeys = await this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const target = await this.findOrFail(tx, id);
+      if (target.role === 'owner') return items.map((item) => item.key);
+      return this.access.grantedKeys(tx, id);
+    });
+    return { items, accessKeys };
+  }
+
+  /** Replaces an employee's menus. They see the change on their next request. */
+  async setAccess(actor: Actor, id: string, keys: string[]) {
+    const normalized = [...new Set(keys.map((key) => key.trim()).filter(Boolean))];
+    await this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const target = await this.findOrFail(tx, id);
+      this.assertMayManage(actor, target.role);
+      if (target.role === 'owner') {
+        throw new BadRequestException('The owner already has access to every menu');
+      }
+      await this.access.replace(tx, {
+        tenantId: actor.tenant.id,
+        userId: id,
+        grantedBy: actor.user.id,
+        keys: normalized,
+      });
+    });
+    return this.getAccess(actor, id);
   }
 
   /** The owner creates an employee with a starting password and a role. */

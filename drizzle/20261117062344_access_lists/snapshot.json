@@ -1,0 +1,792 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "02ac7b96-b7a9-4b3c-9e60-54ac25ce5d8b",
+  "prevIds": [
+    "141a1ffc-72d0-41d4-b142-fd0bb7737316"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "public",
+        "access_kind"
+      ],
+      "writes": [
+        "s|enum|public.access_kind",
+        "n|enum|public.access_kind",
+        "e|enum|public.access_kind",
+        "n|type|public.access_kind"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "access_items"
+      ],
+      "writes": [
+        "s|tbl|public.access_items",
+        "n|tbl|public.access_items",
+        "e|tbl|public.access_items",
+        "n|rel|public.access_items",
+        "n|type|public.access_items",
+        "n|rel|public.access_items_pkey"
+      ],
+      "reads": [
+        "n|sch|public",
+        "n|enum|public.access_kind"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "user_access"
+      ],
+      "writes": [
+        "s|tbl|public.user_access",
+        "n|tbl|public.user_access",
+        "e|tbl|public.user_access",
+        "n|rel|public.user_access",
+        "n|type|public.user_access",
+        "n|rel|public.user_access_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "access_items",
+        "access_items_key_key"
+      ],
+      "writes": [
+        "s|idx|public.access_items_key_key",
+        "n|idx|public.access_items_key_key",
+        "e|idx|public.access_items_key_key",
+        "n|rel|public.access_items_key_key"
+      ],
+      "reads": [
+        "n|tbl|public.access_items",
+        "n|sch|public",
+        "n|col|public.access_items.key"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "access_items",
+        "access_items_kind_sort_idx"
+      ],
+      "writes": [
+        "s|idx|public.access_items_kind_sort_idx",
+        "n|idx|public.access_items_kind_sort_idx",
+        "e|idx|public.access_items_kind_sort_idx",
+        "n|rel|public.access_items_kind_sort_idx"
+      ],
+      "reads": [
+        "n|tbl|public.access_items",
+        "n|sch|public",
+        "n|col|public.access_items.kind",
+        "n|col|public.access_items.sort_order"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "user_access",
+        "user_access_user_item_key"
+      ],
+      "writes": [
+        "s|idx|public.user_access_user_item_key",
+        "n|idx|public.user_access_user_item_key",
+        "e|idx|public.user_access_user_item_key",
+        "n|rel|public.user_access_user_item_key"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|col|public.user_access.user_id",
+        "n|col|public.user_access.access_item_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "user_access",
+        "user_access_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|public.user_access_tenant_idx",
+        "n|idx|public.user_access_tenant_idx",
+        "e|idx|public.user_access_tenant_idx",
+        "n|rel|public.user_access_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|col|public.user_access.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "user_access",
+        "user_access_user_idx"
+      ],
+      "writes": [
+        "s|idx|public.user_access_user_idx",
+        "n|idx|public.user_access_user_idx",
+        "e|idx|public.user_access_user_idx",
+        "n|rel|public.user_access_user_idx"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|col|public.user_access.user_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "user_access"
+      ],
+      "writes": [
+        "s|fk|public.user_access.user_access_tenant_id_tenants_id_fkey",
+        "n|fk|public.user_access.user_access_tenant_id_tenants_id_fkey",
+        "e|fk|public.user_access.user_access_tenant_id_tenants_id_fkey",
+        "n|con|public.user_access.user_access_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|tbl|public.tenants",
+        "n|sch|public",
+        "n|col|public.user_access.tenant_id",
+        "n|col|public.tenants.id",
+        "e|uniqueness|public.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "user_access"
+      ],
+      "writes": [
+        "s|fk|public.user_access.user_access_user_id_users_id_fkey",
+        "n|fk|public.user_access.user_access_user_id_users_id_fkey",
+        "e|fk|public.user_access.user_access_user_id_users_id_fkey",
+        "n|con|public.user_access.user_access_user_id_users_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.user_access.user_id",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "user_access"
+      ],
+      "writes": [
+        "s|fk|public.user_access.user_access_access_item_id_access_items_id_fkey",
+        "n|fk|public.user_access.user_access_access_item_id_access_items_id_fkey",
+        "e|fk|public.user_access.user_access_access_item_id_access_items_id_fkey",
+        "n|con|public.user_access.user_access_access_item_id_access_items_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|tbl|public.access_items",
+        "n|sch|public",
+        "n|col|public.user_access.access_item_id",
+        "n|col|public.access_items.id",
+        "e|uniqueness|public.access_items.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "user_access"
+      ],
+      "writes": [
+        "s|fk|public.user_access.user_access_granted_by_users_id_fkey",
+        "n|fk|public.user_access.user_access_granted_by_users_id_fkey",
+        "e|fk|public.user_access.user_access_granted_by_users_id_fkey",
+        "n|con|public.user_access.user_access_granted_by_users_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.user_access.granted_by",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "public",
+        "user_access"
+      ],
+      "writes": [
+        "s|pol|public.user_access.tenant_isolation",
+        "n|pol|public.user_access.tenant_isolation",
+        "e|pol|public.user_access.tenant_isolation"
+      ],
+      "reads": [
+        "n|tbl|public.user_access",
+        "n|sch|public",
+        "n|role|infynix_tenant",
+        "e|rls|public.user_access"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "access_items",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "user_access",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "access_kind",
+        "values": [
+          "menu",
+          "action"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "label",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "kind",
+        "type": "access_kind",
+        "typeSchema": "public",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'menu'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "sort_order",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "is_active",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "true",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "access_item_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "granted_by",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "granted_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "access_items_key_key",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "key",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "access_items_kind_sort_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "kind",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "sort_order",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_user_item_key",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "access_item_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_user_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_user_id_users_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "user_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_access_item_id_access_items_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "access_item_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "access_items",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_granted_by_users_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "granted_by"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "access_items",
+        "name": "access_items_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "user_access_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "user_access",
+        "name": "tenant_isolation",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "infynix_tenant"
+        ],
+        "using": "\"user_access\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "withCheck": "\"user_access\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

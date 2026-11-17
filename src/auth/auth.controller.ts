@@ -6,6 +6,7 @@ import {
   type SessionRecord,
 } from '@nestjs/authentication';
 import { Can } from '@nestjs/authorization';
+import { AccessService } from '../access/access.service.js';
 import type { AuthUser } from '../users/user.types.js';
 import { TenantsRepository } from '../tenancy/tenants.repository.js';
 import { UsersRepository } from '../users/users.repository.js';
@@ -23,11 +24,16 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly users: UsersRepository,
     private readonly tenants: TenantsRepository,
+    private readonly access: AccessService,
   ) {}
 
-  /** The person plus their company. */
+  /** The person, their company, and the menu keys they may use. */
   private async session(user: AuthUser) {
-    return { user, tenant: await this.tenants.findById(user.tenantId) };
+    const [tenant, access] = await Promise.all([
+      this.tenants.findById(user.tenantId),
+      this.access.keysFor(user),
+    ]);
+    return { user, tenant, access };
   }
 
   @Public()
