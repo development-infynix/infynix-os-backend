@@ -10,7 +10,13 @@ import {
   type Client,
   ClientsRepository,
 } from './clients.repository.js';
-import type { CreateClientDto, UpdateClientDto } from './dto/clients.dto.js';
+import type {
+  CreateClientDto,
+  ImportClientRowDto,
+  UpdateClientDto,
+} from './dto/clients.dto.js';
+
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 /** Blank optional contact details are stored as null, not empty strings. */
 export const normalizeContact = (value?: string | null): string | null => {
@@ -77,6 +83,32 @@ export class ClientsService {
           : { customDetails: { ...dto.customDetails } }),
       }))!;
     });
+  }
+
+  /** One import chunk: valid rows are created, unusable rows are counted as skipped. */
+  async importChunk(actor: Actor, rows: ImportClientRowDto[]) {
+    let created = 0;
+    let skipped = 0;
+    await this.tenantDb.run(actor.tenant.id, async (tx) => {
+      for (const row of rows) {
+        const name = row.name?.trim();
+        const email = normalizeContact(row.email);
+        const phone = normalizeContact(row.phone);
+        if (!name || (!email && !phone) || (email && !EMAIL_RE.test(email))) {
+          skipped += 1;
+          continue;
+        }
+        await this.clients.create(tx, {
+          tenantId: actor.tenant.id,
+          name,
+          email,
+          phone,
+          customDetails: { ...row.customDetails },
+        });
+        created += 1;
+      }
+    });
+    return { created, skipped };
   }
 
   async remove(actor: Actor, id: string): Promise<void> {

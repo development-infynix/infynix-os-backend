@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TenantDb, TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import type { Client, ClientsRepository } from './clients.repository.js';
+import type { ImportClientRowDto } from './dto/clients.dto.js';
 import {
   assertContact,
   ClientsService,
@@ -105,6 +106,22 @@ describe('ClientsService', () => {
       email: null,
       phone: ' 123 ',
     });
+  });
+
+  it('imports valid rows from a chunk and skips unusable ones', async () => {
+    create.mockResolvedValue(client());
+    const rows = [
+      { name: 'Good', email: 'A@B.CO' },
+      { name: 'No contact' },
+      { name: 'Bad email', email: 'not-an-email' },
+    ] as ImportClientRowDto[];
+
+    await expect(service.importChunk(actor, rows)).resolves.toEqual({ created: 1, skipped: 2 });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ tenantId: 't1', email: 'A@B.CO', name: 'Good' }),
+    );
   });
 
   it('rejects an update that would remove the last contact method', async () => {

@@ -17,6 +17,7 @@ import { ClientPolicy } from './client.policy.js';
 import { ClientsService } from './clients.service.js';
 import {
   CreateClientDto,
+  ImportClientsDto,
   ListClientsQuery,
   UpdateClientDto,
 } from './dto/clients.dto.js';
@@ -36,6 +37,13 @@ export class ClientsController {
   @Can(ClientPolicy, 'use')
   get(@CurrentActor() actor: Actor, @Param('id', ParseUUIDPipe) id: string) {
     return this.clients.get(actor, id);
+  }
+
+  /** One chunk of an import, at most 100 rows per request. */
+  @Post('import')
+  @Can(ClientPolicy, 'use')
+  importChunk(@CurrentActor() actor: Actor, @Body() dto: ImportClientsDto) {
+    return this.clients.importChunk(actor, dto.clients);
   }
 
   @Post()

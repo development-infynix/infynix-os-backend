@@ -1,5 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsEmail,
   IsInt,
   IsObject,
@@ -10,6 +13,7 @@ import {
   MaxLength,
   Min,
   registerDecorator,
+  ValidateNested,
   type ValidationArguments,
 } from 'class-validator';
 
@@ -110,4 +114,38 @@ export class ListClientsQuery {
   @IsString()
   @MaxLength(100)
   q?: string;
+}
+
+/** One row from a spreadsheet. Bad contact values are skipped by the service. */
+export class ImportClientRowDto {
+  @Transform(trim)
+  @IsString()
+  @Length(1, 120)
+  name: string;
+
+  @IsOptional()
+  @Transform(trimLower)
+  @IsString()
+  @MaxLength(254)
+  email?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(50)
+  phone?: string;
+
+  @IsOptional()
+  @IsObject()
+  customDetails?: Record<string, unknown>;
+}
+
+/** At most one chunk of 100 rows per request; the frontend sends chunks in order. */
+export class ImportClientsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => ImportClientRowDto)
+  clients: ImportClientRowDto[];
 }
