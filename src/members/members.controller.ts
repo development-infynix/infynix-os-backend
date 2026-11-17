@@ -21,7 +21,10 @@ export class MembersController {
   @Get()
   @Can(TenantPolicy, 'administer')
   list(@CurrentActor() actor: Actor, @Query() query: ListMembersQuery) {
-    return this.members.list(actor, query.page, query.pageSize);
+    return this.members.list(actor, query.page, query.pageSize, {
+      status: query.status,
+      role: query.role,
+    });
   }
 
   /** Search by name or email. Declared before ':id' so "search" isn't read as an id. */

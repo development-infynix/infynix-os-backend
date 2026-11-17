@@ -94,6 +94,15 @@ export class ListMembersQuery {
   @Min(1)
   @Max(100)
   pageSize: number = 50;
+
+  @IsOptional()
+  @IsIn(['active', 'deactivated'])
+  status?: 'active' | 'deactivated';
+
+  /** `admin` covers both administrative roles: owner and manager. */
+  @IsOptional()
+  @IsIn(['staff', 'admin'])
+  role?: 'staff' | 'admin';
 }
 
 /** ?q=priya&limit=20: users whose name or email contains q. */

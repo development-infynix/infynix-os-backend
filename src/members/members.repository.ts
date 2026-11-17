@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
 import { users } from '../db/schema.js';
 import type { MemberRole } from '../tenancy/tenancy.types.js';
@@ -13,6 +13,12 @@ export interface Member {
   isActive: boolean;
   lastLoginAt: Date | null;
   createdAt: Date;
+}
+
+/** Optional server-side filters for the people list. */
+export interface MemberFilters {
+  status?: 'active' | 'deactivated';
+  role?: 'staff' | 'admin';
 }
 
 const memberColumns = {
@@ -36,15 +42,29 @@ export class MembersRepository {
    * One page of the company's users, oldest first. The id breaks ties so a
    * row can't appear on two pages (several users can share a timestamp).
    */
-  async page(tx: TenantTx, page: number, pageSize: number): Promise<{ items: Member[]; total: number }> {
+  async page(
+    tx: TenantTx,
+    page: number,
+    pageSize: number,
+    filters: MemberFilters = {},
+  ): Promise<{ items: Member[]; total: number }> {
+    const conditions: SQL[] = [];
+    if (filters.status) conditions.push(eq(users.isActive, filters.status === 'active'));
+    if (filters.role === 'staff') conditions.push(eq(users.role, 'staff'));
+    if (filters.role === 'admin') {
+      conditions.push(inArray(users.role, ['owner', 'manager']));
+    }
+    const where = and(...conditions);
+
     const [items, [{ total }]] = await Promise.all([
       tx
         .select(memberColumns)
         .from(users)
+        .where(where)
         .orderBy(asc(users.createdAt), asc(users.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize),
-      tx.select({ total: count() }).from(users),
+      tx.select({ total: count() }).from(users).where(where),
     ]);
     return { items, total };
   }

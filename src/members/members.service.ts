@@ -11,7 +11,7 @@ import { TenantDb, type TenantTx } from '../db/tenant-db.js';
 import { TenantPolicy } from '../tenancy/tenant.policy.js';
 import type { Actor, MemberRole } from '../tenancy/tenancy.types.js';
 import type { AddMemberDto, UpdateMemberDto } from './dto/members.dto.js';
-import { type Member, MembersRepository } from './members.repository.js';
+import { type Member, type MemberFilters, MembersRepository } from './members.repository.js';
 
 const EMAIL_IN_USE = 'This email is already used by another account';
 import { isUniqueViolation } from '../db/errors.js';
@@ -41,9 +41,9 @@ export class MembersService {
   }
 
   /** One page of the company's users, with what the table footer needs. */
-  async list(actor: Actor, page: number, pageSize: number) {
+  async list(actor: Actor, page: number, pageSize: number, filters: MemberFilters = {}) {
     const { items, total } = await this.tenantDb.run(actor.tenant.id, (tx) =>
-      this.members.page(tx, page, pageSize),
+      this.members.page(tx, page, pageSize, filters),
     );
     return { items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
