@@ -3,7 +3,7 @@
 How sign-up, sign-in, companies (tenants), roles and data isolation work in the Infynix API.
 
 - **Stack:** NestJS 12 · `@nestjs/authentication` (sessions, password hashing) · `@nestjs/authorization` (policies) · `@nestjs/drizzle` + Drizzle ORM · PostgreSQL on Neon
-- **Base URL:** `http://localhost:3001/api/v1`
+- **Base URL:** local `http://localhost:3001/api/v1`; production `https://infynixos.pages.dev/api/v1`, which the frontend's Cloudflare proxy forwards to the backend on Stackshift (see §5 and `../../servers.md`)
 
 ---
 
@@ -12,7 +12,7 @@ How sign-up, sign-in, companies (tenants), roles and data isolation work in the 
 Infynix OS is a multi-tenant SaaS with a simple shape:
 
 1. A business signs up on the public sign-up page. That creates **one company (tenant) and its owner account**.
-2. Inside the app the owner **adds employees** in **Admin › Users** by setting their name, email, password and role.
+2. Inside the app the owner **adds employees** in **Admin › System** (route `/admin/users`) by setting their name, email, password and role.
 3. **Each person belongs to exactly one company** (`users.tenant_id`, `users.role`). Everyone signs in on the same page with their email. The company comes from who signed in, so URLs are plain (`/`, `/members`).
 
 | Table | What | Isolation |
@@ -87,12 +87,23 @@ Sign-in doesn't check these rules, so tightening them later never locks anyone o
 |---|---|---|
 | Absolute lifetime | `SESSION_ABSOLUTE_TTL` | `7d` |
 | Idle timeout | `SESSION_IDLE_TTL` | `1d` |
-| Origins allowed to use the cookie for writes, sign-in and sign-up | `CORS_ORIGINS` | `http://localhost:5173` |
+| Origins allowed to use the cookie for writes, sign-in and sign-up (also the CORS list) | `CORS_ORIGINS` | `http://localhost:5173` |
 
 - The cookie is `__Host-sid` (`HttpOnly`, `Secure`, `SameSite=Lax`), and only its SHA-256 is stored.
 - Sign-in replaces the browser's previous session.
 - CORS allows `GET, HEAD, POST, PUT, PATCH, DELETE` with credentials. Fastify's default is GET/HEAD/POST only.
 - The frontend sends `credentials: 'include'`, and sets `Content-Type: application/json` **only when there is a body**: Fastify rejects an empty JSON body with a 400.
+
+### `CORS_ORIGINS`
+
+- A comma-separated list of exact origins, e.g. `https://infynixos.pages.dev,http://localhost:5173`. It's parsed once in `src/config/origins.ts` and used for both CORS and the session's trusted origins.
+- Spaces and trailing slashes are tidied up. **`*` is never allowed**, because the API uses cookies and a wildcard would let any website act as a signed-in user. `*` and malformed entries (paths, missing scheme) are skipped with a warning instead of crashing startup.
+- Startup logs `[config] allowed origins: …`, showing what the deployment actually received.
+
+### Cookies in production (same-site rule)
+
+- The browser only sends `__Host-sid` back to the site that set it. If the frontend called the backend's own domain (`*.stackshift.cloud`) from `infynixos.pages.dev`, the cookie would be cross-site and never sent. Sign-in would appear to work, then every request would get `401 missing_credentials` and a refresh would sign you out.
+- So production builds of the frontend always call **same-origin `/api/v1`** (`frontend/src/lib/api.ts`). The Cloudflare Pages Function `frontend/functions/api/[[path]].ts` proxies those calls to the backend, passing cookies and `Set-Cookie` through. `VITE_API_URL` only applies in development.
 
 ---
 
@@ -111,13 +122,15 @@ Errors have the shape `{ statusCode, message, error?, errorCode? }`.
 | `PATCH /auth/me` `{fullName}` | signed in | Changes your own name |
 | `POST /auth/change-password` `{currentPassword, newPassword}` | signed in | `204`; ends your other sessions |
 
-### Admin › Users: `/members` (owner only)
+### Admin › System: `/members` (owner only)
 
 | Method & path | Notes |
 |---|---|
-| `GET /members` | `{ items: Member[] }` |
+| `GET /members?page=1&pageSize=50` | `{ items: Member[], total, page, pageSize, totalPages }`. Oldest first; `pageSize` 1–100, default 50 |
+| `GET /members/search?q=priya&limit=20` | `{ items: Member[] }`. Name or email contains `q` (1–100 chars, `%`/`_` matched literally); names starting with `q` first. `limit` 1–50, default 20 |
+| `GET /members/:id` | `Member`; 404 if not in your company |
 | `POST /members` `{fullName, email, password, role}` | `201 Member`. 409 if the email is in use |
-| `PATCH /members/:id` `{fullName?, role?, isActive?}` | Rules in §2 |
+| `PATCH /members/:id` `{fullName?, email?, role?, isActive?}` | Rules in §2. 409 if the new email is in use |
 | `PUT /members/:id/password` `{password}` | `204`; signs them out |
 | `DELETE /members/:id` | `204`; deletes the account |
 
@@ -155,6 +168,7 @@ pnpm test:e2e     # includes the tenant-isolation test against the database
 src/
 ├── app.module.ts             Drizzle, sessions, authorization (getUser → ActorResolver)
 ├── main.ts                   Fastify, helmet, CORS (incl. PUT/PATCH/DELETE)
+├── config/origins.ts         CORS_ORIGINS → exact origin list (no '*'), logged at startup
 ├── db/
 │   ├── schema.ts             tenants, users (RLS), sessions, roles
 │   ├── tenant-db.ts          TenantDb.run(): the only door to company-owned rows
@@ -165,7 +179,7 @@ src/
 │   ├── actor.resolver.ts     signed-in user → { user, tenant }; suspended → 403
 │   ├── tenant.policy.ts      who may manage whom
 │   └── tenants.repository.ts company lookup; sign-up creates company + owner
-├── members/                  /members (everything through TenantDb)
+├── members/                  /members: list (paged), search, get, add, edit, password, remove (all through TenantDb)
 └── users/                    own-account lookups (sign-in, session, profile)
 ```
 
@@ -175,6 +189,6 @@ To protect a company route: add `@Can(TenantPolicy, '<ability>')`, read `@Curren
 
 ## 9. Next
 
-- Email via **Resend**: a real forgot-password flow (today `/forgot-password` explains that the owner or a manager sets a new one), and optionally emailed invitations instead of starting passwords.
+- Email via **Resend**: a real forgot-password flow (today `/forgot-password` explains that the company owner sets a new one), and optionally emailed invitations instead of starting passwords.
 - A platform admin console to list and suspend companies.
 - Before launch: rate limiting on sign-in and sign-up (`@nestjs/throttler`).
