@@ -43,6 +43,7 @@ describe('ClientImportsService', () => {
   const create = vi.fn<ClientImportsRepository['create']>();
   const list = vi.fn<ClientImportsRepository['list']>();
   const find = vi.fn<ClientImportsRepository['find']>();
+  const removeWithClients = vi.fn<ClientImportsRepository['removeWithClients']>();
   const run = vi.fn(
     (_tenantId: string, fn: (tx: TenantTx) => Promise<unknown>) => fn(tx),
   );
@@ -53,9 +54,10 @@ describe('ClientImportsService', () => {
     create.mockResolvedValue(summary);
     list.mockResolvedValue([summary]);
     find.mockResolvedValue(withRows);
+    removeWithClients.mockResolvedValue(3);
     service = new ClientImportsService(
       { run } as unknown as TenantDb,
-      { create, list, find } as unknown as ClientImportsRepository,
+      { create, list, find, removeWithClients } as unknown as ClientImportsRepository,
     );
   });
 
@@ -83,6 +85,12 @@ describe('ClientImportsService', () => {
   it('does not reveal imports of another tenant', async () => {
     find.mockResolvedValue(null);
     await expect(service.get(actor, 'other')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('removes an import together with its linked clients', async () => {
+    await expect(service.remove(actor, 'i1')).resolves.toBe(3);
+    expect(find).toHaveBeenCalledWith(tx, 'i1');
+    expect(removeWithClients).toHaveBeenCalledWith(tx, 'i1');
   });
 });
 

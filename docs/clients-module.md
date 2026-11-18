@@ -99,7 +99,7 @@ Hiding the menu therefore also closes the endpoints; this is the first module wh
 | `GET` | `/client-imports` | — | newest import summaries |
 | `GET` | `/client-imports/:id` | — | summary plus stored `rows` |
 | `PATCH` | `/client-imports/:id` | `{ name }` | renamed import summary |
-| `DELETE` | `/client-imports/:id` | — | 204; its clients stay with `import_id = null` |
+| `DELETE` | `/client-imports/:id` | — | 204; deletes linked clients in 100-row chunks, then the import |
 | `PATCH` | `/clients/:id` | any subset of the create fields | updated `Client` |
 | `DELETE` | `/clients/:id` | — | 204 |
 

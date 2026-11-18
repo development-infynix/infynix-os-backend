@@ -45,11 +45,11 @@ export class ClientImportsService {
     });
   }
 
-  async remove(actor: Actor, id: string): Promise<void> {
-    await this.tenantDb.run(actor.tenant.id, async (tx) => {
+  async remove(actor: Actor, id: string): Promise<number> {
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const row = await this.imports.find(tx, id);
       if (!row) throw new NotFoundException('Import not found');
-      await this.imports.remove(tx, id);
+      return this.imports.removeWithClients(tx, id);
     });
   }
 }

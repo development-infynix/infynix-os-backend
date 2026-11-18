@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, eq, inArray, sql } from 'drizzle-orm';
 import type { ClientImportRow } from '../db/schema.js';
-import { clientImports } from '../db/schema.js';
+import { clientImports, clients } from '../db/schema.js';
 import type { TenantTx } from '../db/tenant-db.js';
 
 /** What the import list and the create response expose: never the rows. */
@@ -74,8 +74,21 @@ export class ClientImportsRepository {
     return row ?? null;
   }
 
-  async remove(tx: TenantTx, id: string): Promise<void> {
+  /** Deletes linked clients 100 at a time, then the import itself. */
+  async removeWithClients(tx: TenantTx, id: string): Promise<number> {
+    let deleted = 0;
+    while (true) {
+      const batch = await tx
+        .select({ id: clients.id })
+        .from(clients)
+        .where(eq(clients.importId, id))
+        .limit(100);
+      if (!batch.length) break;
+      await tx.delete(clients).where(inArray(clients.id, batch.map((row) => row.id)));
+      deleted += batch.length;
+    }
     await tx.delete(clientImports).where(eq(clientImports.id, id));
+    return deleted;
   }
 
   /**
