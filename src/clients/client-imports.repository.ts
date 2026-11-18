@@ -100,6 +100,8 @@ export class ClientImportsRepository {
       .limit(limit);
     if (batch.length) {
       await tx.delete(clients).where(inArray(clients.id, batch.map((row) => row.id)));
+      // Keep the import's count right even if the client loop stops partway.
+      await this.decrementCreated(tx, id, batch.length);
     }
     const [remaining] = await tx
       .select({ value: count() })

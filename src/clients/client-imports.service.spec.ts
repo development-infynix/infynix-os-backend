@@ -44,6 +44,8 @@ describe('ClientImportsService', () => {
   const list = vi.fn<ClientImportsRepository['list']>();
   const find = vi.fn<ClientImportsRepository['find']>();
   const removeWithClients = vi.fn<ClientImportsRepository['removeWithClients']>();
+  const exists = vi.fn<ClientImportsRepository['exists']>();
+  const deleteClientChunk = vi.fn<ClientImportsRepository['deleteClientChunk']>();
   const run = vi.fn(
     (_tenantId: string, fn: (tx: TenantTx) => Promise<unknown>) => fn(tx),
   );
@@ -55,9 +57,11 @@ describe('ClientImportsService', () => {
     list.mockResolvedValue([summary]);
     find.mockResolvedValue(withRows);
     removeWithClients.mockResolvedValue(3);
+    exists.mockResolvedValue(true);
+    deleteClientChunk.mockResolvedValue({ deleted: 100, remaining: 20 });
     service = new ClientImportsService(
       { run } as unknown as TenantDb,
-      { create, list, find, removeWithClients } as unknown as ClientImportsRepository,
+      { create, list, find, removeWithClients, exists, deleteClientChunk } as unknown as ClientImportsRepository,
     );
   });
 
@@ -89,8 +93,24 @@ describe('ClientImportsService', () => {
 
   it('removes an import together with its linked clients', async () => {
     await expect(service.remove(actor, 'i1')).resolves.toBe(3);
-    expect(find).toHaveBeenCalledWith(tx, 'i1');
+    expect(exists).toHaveBeenCalledWith(tx, 'i1');
+    expect(find).not.toHaveBeenCalled();
     expect(removeWithClients).toHaveBeenCalledWith(tx, 'i1');
+  });
+
+  it('deletes a chunk of an import without loading its stored rows', async () => {
+    await expect(service.deleteClientChunk(actor, 'i1', 100)).resolves.toEqual({ deleted: 100, remaining: 20 });
+    expect(exists).toHaveBeenCalledWith(tx, 'i1');
+    expect(find).not.toHaveBeenCalled();
+    expect(deleteClientChunk).toHaveBeenCalledWith(tx, 'i1', 100);
+  });
+
+  it('refuses to delete from an import of another tenant', async () => {
+    exists.mockResolvedValue(false);
+    await expect(service.deleteClientChunk(actor, 'other', 100)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.remove(actor, 'other')).rejects.toBeInstanceOf(NotFoundException);
+    expect(deleteClientChunk).not.toHaveBeenCalled();
+    expect(removeWithClients).not.toHaveBeenCalled();
   });
 });
 
@@ -110,5 +130,41 @@ describe('ClientImportsRepository.recordChunk', () => {
     expect(values.skippedCount).toBeInstanceOf(SQL);
     expect(values.rows).toBeInstanceOf(SQL);
     expect(where).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ClientImportsRepository.deleteClientChunk', () => {
+  const fakeTx = (batch: { id: string }[], remaining: number) => {
+    const limit = vi.fn().mockResolvedValue(batch);
+    const countWhere = vi.fn().mockResolvedValue([{ value: remaining }]);
+    let selects = 0;
+    const select = vi.fn(() => ({
+      from: () => ({
+        where: (...args: unknown[]) => (++selects === 1 ? { limit } : countWhere(...args)),
+      }),
+    }));
+    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    const del = vi.fn(() => ({ where: deleteWhere }));
+    return { tx: { select, delete: del } as unknown as TenantTx, del };
+  };
+
+  it('lowers the import created count by the clients it deleted', async () => {
+    const { tx: chunkTx, del } = fakeTx([{ id: 'c1' }, { id: 'c2' }], 5);
+    const repo = new ClientImportsRepository();
+    const decrement = vi.spyOn(repo, 'decrementCreated').mockResolvedValue(undefined);
+
+    await expect(repo.deleteClientChunk(chunkTx, 'i1', 100)).resolves.toEqual({ deleted: 2, remaining: 5 });
+    expect(del).toHaveBeenCalledOnce();
+    expect(decrement).toHaveBeenCalledWith(chunkTx, 'i1', 2);
+  });
+
+  it('leaves the count alone when nothing is left to delete', async () => {
+    const { tx: chunkTx, del } = fakeTx([], 0);
+    const repo = new ClientImportsRepository();
+    const decrement = vi.spyOn(repo, 'decrementCreated').mockResolvedValue(undefined);
+
+    await expect(repo.deleteClientChunk(chunkTx, 'i1', 100)).resolves.toEqual({ deleted: 0, remaining: 0 });
+    expect(del).not.toHaveBeenCalled();
+    expect(decrement).not.toHaveBeenCalled();
   });
 });
