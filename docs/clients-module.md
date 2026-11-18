@@ -98,6 +98,8 @@ Hiding the menu therefore also closes the endpoints; this is the first module wh
 | `POST` | `/client-imports` | `{ name, fileName, rowCount }` | import summary with `id`, 201 |
 | `GET` | `/client-imports` | — | newest import summaries |
 | `GET` | `/client-imports/:id` | — | summary plus stored `rows` |
+| `PATCH` | `/client-imports/:id` | `{ name }` | renamed import summary |
+| `DELETE` | `/client-imports/:id` | — | 204; its clients stay with `import_id = null` |
 | `PATCH` | `/clients/:id` | any subset of the create fields | updated `Client` |
 | `DELETE` | `/clients/:id` | — | 204 |
 
@@ -132,11 +134,12 @@ On the Imports tab, **View rows** switches to Clients with that import's `import
 
 Screens:
 
-- `src/clients/pages/ClientsPage.tsx` — desktop table, mobile cards, shared `Loader`, error/retry, pagination
+- `src/clients/pages/ClientsPage.tsx` — desktop table, mobile cards, shared `Loader`, error/retry, pagination, icon-only delete next to View
 - `src/clients/components/SearchClientsDialog.tsx` — debounced search by name, email or phone; arrow keys and Enter
 - `src/clients/components/AddClientDialog.tsx` — form entry point from the **Add client** dropdown
 - `src/clients/components/ClientImportModal.tsx` — four-step Excel/CSV import wizard
 - `src/clients/components/ClientImportsPanel.tsx` — import cards on the Imports tab
+- `src/clients/components/ClientImportCard.tsx` — one card with settings menu (rename, delete, disabled Move to CRM)
 - `src/clients/components/ClientDetailsDrawer.tsx` — view, edit and delete
 - `src/clients/components/CustomDetailsEditor.tsx` — key/value rows
 

@@ -3,7 +3,7 @@ import { TenantDb } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import type { ClientImport, ClientImportSummary } from './client-imports.repository.js';
 import { ClientImportsRepository } from './client-imports.repository.js';
-import type { CreateClientImportDto } from './dto/client-imports.dto.js';
+import type { CreateClientImportDto, ImportNameDto } from './dto/client-imports.dto.js';
 
 /** Import records inside the actor's own company (all through TenantDb). */
 @Injectable()
@@ -34,6 +34,22 @@ export class ClientImportsService {
       const row = await this.imports.find(tx, id);
       if (!row) throw new NotFoundException('Import not found');
       return row;
+    });
+  }
+
+  rename(actor: Actor, id: string, dto: ImportNameDto): Promise<ClientImportSummary> {
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const row = await this.imports.rename(tx, id, dto.name);
+      if (!row) throw new NotFoundException('Import not found');
+      return row;
+    });
+  }
+
+  async remove(actor: Actor, id: string): Promise<void> {
+    await this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const row = await this.imports.find(tx, id);
+      if (!row) throw new NotFoundException('Import not found');
+      await this.imports.remove(tx, id);
     });
   }
 }

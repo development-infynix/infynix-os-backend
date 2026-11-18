@@ -65,6 +65,19 @@ export class ClientImportsRepository {
     return row ?? null;
   }
 
+  async rename(tx: TenantTx, id: string, name: string): Promise<ClientImportSummary | null> {
+    const [row] = await tx
+      .update(clientImports)
+      .set({ name })
+      .where(eq(clientImports.id, id))
+      .returning(summaryColumns);
+    return row ?? null;
+  }
+
+  async remove(tx: TenantTx, id: string): Promise<void> {
+    await tx.delete(clientImports).where(eq(clientImports.id, id));
+  }
+
   /**
    * One statement per chunk: the counters grow with SQL increments and the
    * normalized payload is appended, so concurrent chunks cannot lose counts.
