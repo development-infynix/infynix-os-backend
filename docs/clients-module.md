@@ -99,8 +99,10 @@ Hiding the menu therefore also closes the endpoints; this is the first module wh
 | `GET` | `/client-imports` | — | newest import summaries |
 | `GET` | `/client-imports/:id` | — | summary plus stored `rows` |
 | `PATCH` | `/client-imports/:id` | `{ name }` | renamed import summary |
-| `DELETE` | `/client-imports/:id` | — | 204; deletes linked clients in 100-row chunks, then the import |
+| `DELETE` | `/client-imports/:id/clients` | `limit` (default 100, max 500) | `{ deleted, remaining }` for one batch |
+| `DELETE` | `/client-imports/:id` | — | 204; deletes any remaining linked clients, then the import |
 | `PATCH` | `/clients/:id` | any subset of the create fields | updated `Client` |
+| `DELETE` | `/clients` | `{ ids: string[] }`, max 500 | `{ deleted }`; chunks ids 100 at a time |
 | `DELETE` | `/clients/:id` | — | 204 |
 
 Search `q` matches name, email or phone case-insensitively; `%` and `_` typed by the user are escaped so they match literally. Results are ordered by `updated_at` descending, then `created_at` descending, then `id` descending as a stable tie-breaker — the most recently touched client is first.
@@ -128,7 +130,7 @@ Backend files:
 - `addClient`, `updateClient`, `removeClient`
 - `detailsToRows` / `rowsToDetails` convert between the JSON object and the key/value editor
 
-The page has **Clients** and **Imports** tabs styled as the recessed segmented control. The Add client button stays available on both tabs. Route: `src/routes/_authed/clients.tsx` keeps `?page=`, `?q=` and `?importId=` in the URL. Switching the funnel filter updates `importId`, and the route loader prefetches that filtered page from the server before the component renders. The existing `requireAccess(session, 'clients')` guard stays in place.
+The page has **Clients** and **Imports** tabs styled as the recessed segmented control; the active tab is remembered in local storage across refreshes. The Add client button stays available on both tabs. An import card's settings menu offers inline rename (tick to save, X to cancel), delete, and disabled Move to CRM. Route: `src/routes/_authed/clients.tsx` keeps `?page=`, `?q=` and `?importId=` in the URL and keeps the existing `requireAccess(session, 'clients')` guard. Switching the funnel filter updates `importId`. Clients and imports fetch separately: the clients query is enabled only on the Clients tab, the imports query only mounts on the Imports tab, and the funnel dropdown fetches import options lazily when opened.
 
 On the Imports tab, **View rows** switches to Clients with that import's `importId` selected in the funnel filter. The funnel dropdown offers **All clients** plus one option per import, and `GET /clients` accepts the same `importId` filter.
 
@@ -159,6 +161,8 @@ Each row is `key`, `value`, then one action button. Only the last row shows `+`;
 4. **Preview** — name the import, then see the first five mapped rows before importing.
 
 Submitting first creates a `client_imports` record with the chosen name and file details, then splits valid rows into chunks of 100 and posts each chunk to `POST /clients/import` with that `importId`. Each created client stores the same `import_id`. During the import the stepper becomes a progress bar; the submit button reads “Importing…”. The server counts rows with no name/contact or an invalid email as skipped and increments the import counters atomically. Both `CLIENTS_KEY` and `CLIENT_IMPORTS_KEY` are invalidated when all chunks finish.
+
+Deleting an import with more than 100 clients uses the same client-driven pattern: `DELETE /client-imports/:id/clients` removes 100 rows per call and returns the remaining count, so the confirmation dialog replaces its Cancel/Delete buttons with a progress bar. The final `DELETE /client-imports/:id` removes the record and any leftover linked clients. Imports with 100 or fewer clients use the endpoint directly without a progress bar.
 
 ### Mobile layout
 

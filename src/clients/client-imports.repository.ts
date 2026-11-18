@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { desc, eq, inArray, sql } from 'drizzle-orm';
+import { count, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { ClientImportRow } from '../db/schema.js';
 import { clientImports, clients } from '../db/schema.js';
 import type { TenantTx } from '../db/tenant-db.js';
@@ -72,6 +72,31 @@ export class ClientImportsRepository {
       .where(eq(clientImports.id, id))
       .returning(summaryColumns);
     return row ?? null;
+  }
+
+  /** Manual client deletes lower the import's created count, never below zero. */
+  async decrementCreated(tx: TenantTx, id: string, amount: number): Promise<void> {
+    await tx
+      .update(clientImports)
+      .set({ createdCount: sql`greatest(0, ${clientImports.createdCount} - ${amount})` })
+      .where(eq(clientImports.id, id));
+  }
+
+  /** One client-driven delete batch, with the count left for the import. */
+  async deleteClientChunk(tx: TenantTx, id: string, limit: number) {
+    const batch = await tx
+      .select({ id: clients.id })
+      .from(clients)
+      .where(eq(clients.importId, id))
+      .limit(limit);
+    if (batch.length) {
+      await tx.delete(clients).where(inArray(clients.id, batch.map((row) => row.id)));
+    }
+    const [remaining] = await tx
+      .select({ value: count() })
+      .from(clients)
+      .where(eq(clients.importId, id));
+    return { deleted: batch.length, remaining: remaining?.value ?? 0 };
   }
 
   /** Deletes linked clients 100 at a time, then the import itself. */

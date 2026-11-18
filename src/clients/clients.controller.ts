@@ -17,6 +17,7 @@ import { ClientPolicy } from './client.policy.js';
 import { ClientsService } from './clients.service.js';
 import {
   CreateClientDto,
+  DeleteClientsDto,
   ImportClientsDto,
   ListClientsQuery,
   UpdateClientDto,
@@ -60,6 +61,13 @@ export class ClientsController {
     @Body() dto: UpdateClientDto,
   ) {
     return this.clients.update(actor, id, dto);
+  }
+
+  /** Chunked delete of selected clients; import counts are adjusted too. */
+  @Delete()
+  @Can(ClientPolicy, 'use')
+  removeMany(@CurrentActor() actor: Actor, @Body() dto: DeleteClientsDto) {
+    return this.clients.removeMany(actor, dto);
   }
 
   @Delete(':id')

@@ -45,6 +45,14 @@ export class ClientImportsService {
     });
   }
 
+  deleteClientChunk(actor: Actor, id: string, limit: number) {
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const row = await this.imports.find(tx, id);
+      if (!row) throw new NotFoundException('Import not found');
+      return this.imports.deleteClientChunk(tx, id, limit);
+    });
+  }
+
   async remove(actor: Actor, id: string): Promise<number> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const row = await this.imports.find(tx, id);

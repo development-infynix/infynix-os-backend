@@ -71,6 +71,15 @@ export class CreateClientDto {
 }
 
 /** On update the service checks the merged email/phone, not just the patch. */
+/** Bulk delete: the service chunks the ids 100 at a time. */
+export class DeleteClientsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID(undefined, { each: true })
+  ids: string[];
+}
+
 export class UpdateClientDto {
   @IsOptional()
   @Transform(trim)

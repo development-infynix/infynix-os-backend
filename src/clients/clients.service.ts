@@ -14,6 +14,7 @@ import {
 } from './clients.repository.js';
 import type {
   CreateClientDto,
+  DeleteClientsDto,
   ImportClientsDto,
   UpdateClientDto,
 } from './dto/clients.dto.js';
@@ -130,10 +131,34 @@ export class ClientsService {
     return { created, skipped };
   }
 
+  /** Chunked bulk delete; import counters follow the clients that were removed. */
+  async removeMany(actor: Actor, dto: DeleteClientsDto) {
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+      let deleted = 0;
+      for (let index = 0; index < dto.ids.length; index += 100) {
+        const chunk = dto.ids.slice(index, index + 100);
+        const found = await this.clients.findByIds(tx, chunk);
+        if (!found.length) continue;
+        await this.clients.removeByIds(tx, found.map((client) => client.id));
+        deleted += found.length;
+
+        const perImport = new Map<string, number>();
+        for (const client of found) {
+          if (client.importId) perImport.set(client.importId, (perImport.get(client.importId) ?? 0) + 1);
+        }
+        for (const [importId, amount] of perImport) {
+          await this.imports.decrementCreated(tx, importId, amount);
+        }
+      }
+      return { deleted };
+    });
+  }
+
   async remove(actor: Actor, id: string): Promise<void> {
     await this.tenantDb.run(actor.tenant.id, async (tx) => {
-      await this.findOrFail(tx, id);
+      const client = await this.findOrFail(tx, id);
       await this.clients.remove(tx, id);
+      if (client.importId) await this.imports.decrementCreated(tx, client.importId, 1);
     });
   }
 

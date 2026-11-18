@@ -9,12 +9,17 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CurrentActor } from '../tenancy/actor.resolver.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import { ClientPolicy } from './client.policy.js';
 import { ClientImportsService } from './client-imports.service.js';
-import { CreateClientImportDto, ImportNameDto } from './dto/client-imports.dto.js';
+import {
+  CreateClientImportDto,
+  DeleteImportChunkQuery,
+  ImportNameDto,
+} from './dto/client-imports.dto.js';
 
 /** Admin › Clients imports: /api/v1/client-imports, behind the clients grant. */
 @Controller('client-imports')
@@ -48,6 +53,16 @@ export class ClientImportsController {
     @Body() dto: ImportNameDto,
   ) {
     return this.imports.rename(actor, id, dto);
+  }
+
+  @Delete(':id/clients')
+  @Can(ClientPolicy, 'use')
+  deleteClientChunk(
+    @CurrentActor() actor: Actor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: DeleteImportChunkQuery,
+  ) {
+    return this.imports.deleteClientChunk(actor, id, query.limit);
   }
 
   @Delete(':id')

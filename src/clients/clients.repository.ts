@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, inArray, or, type SQL } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
 import { clients } from '../db/schema.js';
 
@@ -94,6 +94,16 @@ export class ClientsRepository {
       .from(clients)
       .where(eq(clients.id, id));
     return row ?? null;
+  }
+
+  async findByIds(tx: TenantTx, ids: string[]): Promise<Client[]> {
+    if (!ids.length) return [];
+    return tx.select(clientColumns).from(clients).where(inArray(clients.id, ids));
+  }
+
+  async removeByIds(tx: TenantTx, ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    await tx.delete(clients).where(inArray(clients.id, ids));
   }
 
   async create(tx: TenantTx, data: CreateClientData): Promise<Client> {

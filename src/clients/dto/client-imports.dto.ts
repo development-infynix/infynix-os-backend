@@ -1,5 +1,5 @@
-import { Transform } from 'class-transformer';
-import { IsInt, IsString, Length, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -23,4 +23,14 @@ export class CreateClientImportDto extends ImportNameDto {
   @Min(1)
   @Max(500)
   rowCount: number;
+}
+
+/** One DELETE batch, driven by the UI so it can show progress. */
+export class DeleteImportChunkQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit: number = 100;
 }
