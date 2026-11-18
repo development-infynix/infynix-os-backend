@@ -63,6 +63,8 @@ describe('ClientsService', () => {
   const remove = vi.fn<ClientsRepository['remove']>();
   const findImport = vi.fn<ClientImportsRepository['find']>();
   const recordChunk = vi.fn<ClientImportsRepository['recordChunk']>();
+  const importExists = vi.fn<ClientImportsRepository['exists']>();
+  const createMany = vi.fn<ClientsRepository['createMany']>();
   const importRow: ClientImport = {
     id: 'i1',
     name: 'Contacts',
@@ -82,10 +84,12 @@ describe('ClientsService', () => {
     vi.clearAllMocks();
     findImport.mockResolvedValue(importRow);
     recordChunk.mockResolvedValue(undefined);
+    importExists.mockResolvedValue(true);
+    createMany.mockImplementation(async (_tx, data) => data.length);
     service = new ClientsService(
       { run } as unknown as TenantDb,
-      { find, create, update, remove } as unknown as ClientsRepository,
-      { find: findImport, recordChunk } as unknown as ClientImportsRepository,
+      { find, create, createMany, update, remove } as unknown as ClientsRepository,
+      { find: findImport, exists: importExists, recordChunk } as unknown as ClientImportsRepository,
     );
   });
 
@@ -126,7 +130,6 @@ describe('ClientsService', () => {
   });
 
   it('imports valid rows from a chunk, skips unusable ones and updates the import', async () => {
-    create.mockResolvedValue(client());
     const rows = [
       { name: 'Good', email: 'A@B.CO', customDetails: { tier: 'gold' } },
       { name: 'No contact' },
@@ -137,10 +140,11 @@ describe('ClientsService', () => {
       created: 1,
       skipped: 2,
     });
-    expect(findImport).toHaveBeenCalledWith(tx, 'i1');
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledWith(
-      tx,
+    expect(importExists).toHaveBeenCalledWith(tx, 'i1');
+    expect(findImport).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(createMany).toHaveBeenCalledTimes(1);
+    expect(createMany).toHaveBeenCalledWith(tx, [
       expect.objectContaining({
         tenantId: 't1',
         importId: 'i1',
@@ -148,7 +152,7 @@ describe('ClientsService', () => {
         name: 'Good',
         customDetails: { tier: 'gold' },
       }),
-    );
+    ]);
     expect(recordChunk).toHaveBeenCalledWith(tx, 'i1', 1, 2, [
       { name: 'Good', email: 'A@B.CO', phone: null, customDetails: { tier: 'gold' } },
       { name: 'No contact', email: null, phone: null, customDetails: {} },
@@ -157,13 +161,13 @@ describe('ClientsService', () => {
   });
 
   it('rejects a chunk whose import is not in the actor tenant', async () => {
-    findImport.mockResolvedValue(null);
+    importExists.mockResolvedValue(false);
     const rows = [{ name: 'Good', email: 'a@b.co' }] as ImportClientRowDto[];
 
     await expect(service.importChunk(actor, { importId: 'missing', clients: rows })).rejects.toBeInstanceOf(
       NotFoundException,
     );
-    expect(create).not.toHaveBeenCalled();
+    expect(createMany).not.toHaveBeenCalled();
     expect(recordChunk).not.toHaveBeenCalled();
   });
 

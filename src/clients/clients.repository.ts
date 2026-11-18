@@ -111,6 +111,13 @@ export class ClientsRepository {
     return row;
   }
 
+  /** One multi-row INSERT for an import chunk; returns how many were written. */
+  async createMany(tx: TenantTx, data: CreateClientData[]): Promise<number> {
+    if (!data.length) return 0;
+    await tx.insert(clients).values(data);
+    return data.length;
+  }
+
   async update(
     tx: TenantTx,
     id: string,

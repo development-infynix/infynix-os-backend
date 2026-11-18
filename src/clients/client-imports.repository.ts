@@ -65,6 +65,15 @@ export class ClientImportsRepository {
     return row ?? null;
   }
 
+  /** Existence check that never loads the (growing) `rows` payload. */
+  async exists(tx: TenantTx, id: string): Promise<boolean> {
+    const [row] = await tx
+      .select({ id: clientImports.id })
+      .from(clientImports)
+      .where(eq(clientImports.id, id));
+    return Boolean(row);
+  }
+
   async rename(tx: TenantTx, id: string, name: string): Promise<ClientImportSummary | null> {
     const [row] = await tx
       .update(clientImports)

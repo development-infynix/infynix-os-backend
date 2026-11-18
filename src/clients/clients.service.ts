@@ -10,6 +10,7 @@ import type { Actor } from '../tenancy/tenancy.types.js';
 import { ClientImportsRepository } from './client-imports.repository.js';
 import {
   type Client,
+  type CreateClientData,
   ClientsRepository,
 } from './clients.repository.js';
 import type {
@@ -99,9 +100,11 @@ export class ClientsService {
     let skipped = 0;
     const storedRows: ClientImportRow[] = [];
     await this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const rowImport = await this.imports.find(tx, dto.importId);
-      if (!rowImport) throw new NotFoundException('Import not found');
+      if (!(await this.imports.exists(tx, dto.importId))) {
+        throw new NotFoundException('Import not found');
+      }
 
+      const toCreate: CreateClientData[] = [];
       for (const row of dto.clients) {
         const name = row.name?.trim();
         const email = normalizeContact(row.email);
@@ -116,17 +119,17 @@ export class ClientsService {
           skipped += 1;
           continue;
         }
-        await this.clients.create(tx, {
+        toCreate.push({
           tenantId: actor.tenant.id,
-          importId: rowImport.id,
+          importId: dto.importId,
           name,
           email,
           phone,
           customDetails: { ...row.customDetails },
         });
-        created += 1;
       }
-      await this.imports.recordChunk(tx, rowImport.id, created, skipped, storedRows);
+      created = await this.clients.createMany(tx, toCreate);
+      await this.imports.recordChunk(tx, dto.importId, created, skipped, storedRows);
     });
     return { created, skipped };
   }
