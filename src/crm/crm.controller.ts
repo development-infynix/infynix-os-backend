@@ -17,6 +17,7 @@ import type { Actor } from '../tenancy/tenancy.types.js';
 import { CrmPolicy } from './crm.policy.js';
 import { CrmService } from './crm.service.js';
 import {
+  AddDealsDto,
   BoardQuery,
   CreateDealDto,
   CreatePipelineDto,
@@ -145,6 +146,13 @@ export class CrmController {
   @Can(CrmPolicy, 'use')
   searchDeals(@CurrentActor() actor: Actor, @Query() query: ListDealsQuery) {
     return this.crm.searchDeals(actor, query.pipelineId, query.q ?? '', query.limit);
+  }
+
+  /** Bulk add existing clients (up to 100 per request) to one stage of a pipeline. */
+  @Post('deals/bulk')
+  @Can(CrmPolicy, 'use')
+  addDeals(@CurrentActor() actor: Actor, @Body() dto: AddDealsDto) {
+    return this.crm.addDeals(actor, dto);
   }
 
   @Get('deals/:id')

@@ -397,6 +397,45 @@ export class CrmRepository {
     return row ?? null;
   }
 
+  /** Which of these clients already have a deal in the pipeline. */
+  async clientIdsWithDealIn(
+    tx: TenantTx,
+    pipelineId: string,
+    clientIds: string[],
+  ): Promise<Set<string>> {
+    if (!clientIds.length) return new Set();
+    const rows = await tx
+      .select({ clientId: crmDeals.clientId })
+      .from(crmDeals)
+      .where(and(eq(crmDeals.pipelineId, pipelineId), inArray(crmDeals.clientId, clientIds)));
+    return new Set(rows.map((row) => row.clientId));
+  }
+
+  /**
+   * One multi-row INSERT for a bulk add. A client that got a deal in this
+   * pipeline meanwhile is skipped by the unique index, not an error; returns
+   * how many deals were actually created.
+   */
+  async createDeals(
+    tx: TenantTx,
+    rows: {
+      tenantId: string;
+      pipelineId: string;
+      stageId: string;
+      clientId: string;
+      position: number;
+      createdBy: string;
+    }[],
+  ): Promise<number> {
+    if (!rows.length) return 0;
+    const created = await tx
+      .insert(crmDeals)
+      .values(rows)
+      .onConflictDoNothing()
+      .returning({ id: crmDeals.id });
+    return created.length;
+  }
+
   async nextDealPosition(tx: TenantTx, stageId: string): Promise<number> {
     const [{ next }] = await tx
       .select({

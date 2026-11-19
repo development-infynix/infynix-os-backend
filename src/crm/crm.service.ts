@@ -17,6 +17,7 @@ import {
   CrmRepository,
 } from './crm.repository.js';
 import type {
+  AddDealsDto,
   CreateDealDto,
   CreatePipelineDto,
   CreateStageDto,
@@ -396,6 +397,45 @@ export class CrmService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Bulk add from the Clients page: existing clients become deals at the end
+   * of one stage (the first by default), in a single insert. Clients already
+   * in the pipeline, and ids that aren't clients of this company, are skipped
+   * and counted rather than failing the batch.
+   */
+  async addDeals(actor: Actor, dto: AddDealsDto) {
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const pipeline = await this.findPipelineOrFail(tx, actor, dto.pipelineId);
+      const stages = await this.crm.findPipelineStages(tx, pipeline.id);
+      const stage = dto.stageId ? stages.find((item) => item.id === dto.stageId) : stages[0];
+      if (!stage) throw new BadRequestException('Stage does not belong to this pipeline');
+
+      const requested = [...new Set(dto.clientIds)];
+      const found = new Set((await this.clients.findByIds(tx, requested)).map((client) => client.id));
+      const existing = await this.crm.clientIdsWithDealIn(tx, pipeline.id, [...found]);
+      const toAdd = requested.filter((id) => found.has(id) && !existing.has(id));
+
+      const start = await this.crm.nextDealPosition(tx, stage.id);
+      const added = await this.crm.createDeals(
+        tx,
+        toAdd.map((clientId, index) => ({
+          tenantId: actor.tenant.id,
+          pipelineId: pipeline.id,
+          stageId: stage.id,
+          clientId,
+          position: start + index,
+          createdBy: actor.user.id,
+        })),
+      );
+      return {
+        added,
+        // Includes any that got a deal between the check and the insert.
+        alreadyInPipeline: existing.size + (toAdd.length - added),
+        notFound: requested.length - found.size,
+      };
+    });
   }
 
   /** Moves a deal to another stage of its own pipeline (position defaults to the end). */
