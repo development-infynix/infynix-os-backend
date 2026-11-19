@@ -3,6 +3,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -255,6 +256,9 @@ export const clients = pgTable.withRLS(
   (t) => [
     index('clients_tenant_id_idx').on(t.tenantId),
     index('clients_import_id_idx').on(t.importId),
+    // Lets the CRM reference a client through (tenant_id, id), so a deal can
+    // never point at another company's client even if RLS is bypassed.
+    uniqueIndex('clients_tenant_id_id_key').on(t.tenantId, t.id),
     check('clients_name_not_blank', sql`length(btrim(${t.name})) > 0`),
     check(
       'clients_contact_required',
@@ -263,3 +267,149 @@ export const clients = pgTable.withRLS(
     tenantIsolation(t.tenantId),
   ],
 );
+
+/* ── CRM ─────────────────────────────────────────────────────────────────── */
+
+/**
+ * A pipeline owns an ordered list of stages and the deals inside it. Every
+ * company has at least one; `list()` creates a default "Sales" pipeline the
+ * first time the CRM is opened.
+ */
+export const crmPipelines = pgTable.withRLS(
+  'crm_pipelines',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    /** Order in the pipeline picker; lower first. */
+    position: integer().notNull().default(0),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('crm_pipelines_tenant_id_idx').on(t.tenantId),
+    index('crm_pipelines_position_idx').on(t.position),
+    // Target for tenant-safe foreign keys from stages and deals.
+    uniqueIndex('crm_pipelines_tenant_id_id_key').on(t.tenantId, t.id),
+    uniqueIndex('crm_pipelines_tenant_name_key').on(
+      t.tenantId,
+      sql`lower(${t.name})`,
+    ),
+    check('crm_pipelines_name_not_blank', sql`length(btrim(${t.name})) > 0`),
+    check('crm_pipelines_position_nonnegative', sql`${t.position} >= 0`),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+/** A column on the board; stages are unique per pipeline (case-insensitively). */
+export const crmPipelineStages = pgTable.withRLS(
+  'crm_pipeline_stages',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    pipelineId: uuid('pipeline_id').notNull(),
+    name: text().notNull(),
+    /** Column order; lower first. */
+    position: integer().notNull().default(0),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('crm_pipeline_stages_pipeline_position_idx').on(
+      t.pipelineId,
+      t.position,
+    ),
+    uniqueIndex('crm_pipeline_stages_pipeline_name_key').on(
+      t.pipelineId,
+      sql`lower(${t.name})`,
+    ),
+    // A deal references its stage through (tenant, pipeline, stage), so a
+    // stage from another pipeline or company is impossible.
+    uniqueIndex('crm_pipeline_stages_tenant_pipeline_id_key').on(
+      t.tenantId,
+      t.pipelineId,
+      t.id,
+    ),
+    foreignKey({
+      name: 'crm_pipeline_stages_pipeline_fk',
+      columns: [t.tenantId, t.pipelineId],
+      foreignColumns: [crmPipelines.tenantId, crmPipelines.id],
+    }).onDelete('cascade'),
+    check('crm_pipeline_stages_name_not_blank', sql`length(btrim(${t.name})) > 0`),
+    check('crm_pipeline_stages_position_nonnegative', sql`${t.position} >= 0`),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+/**
+ * A client's participation in one pipeline — the "CRM id". The client owns the
+ * contact details; the deal only points at it. One client may appear in many
+ * pipelines, but only once in any single pipeline.
+ */
+export const crmDeals = pgTable.withRLS(
+  'crm_deals',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    pipelineId: uuid('pipeline_id').notNull(),
+    stageId: uuid('stage_id').notNull(),
+    clientId: uuid('client_id').notNull(),
+    /** Order inside the stage; lower first. */
+    position: integer().notNull().default(0),
+    createdBy: uuid('created_by').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('crm_deals_stage_position_idx').on(t.stageId, t.position),
+    index('crm_deals_pipeline_idx').on(t.pipelineId),
+    index('crm_deals_client_id_idx').on(t.clientId),
+    uniqueIndex('crm_deals_tenant_pipeline_client_key').on(
+      t.tenantId,
+      t.pipelineId,
+      t.clientId,
+    ),
+    foreignKey({
+      name: 'crm_deals_pipeline_fk',
+      columns: [t.tenantId, t.pipelineId],
+      foreignColumns: [crmPipelines.tenantId, crmPipelines.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'crm_deals_pipeline_stage_fk',
+      columns: [t.tenantId, t.pipelineId, t.stageId],
+      foreignColumns: [
+        crmPipelineStages.tenantId,
+        crmPipelineStages.pipelineId,
+        crmPipelineStages.id,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'crm_deals_client_fk',
+      columns: [t.tenantId, t.clientId],
+      foreignColumns: [clients.tenantId, clients.id],
+    }).onDelete('cascade'),
+    check('crm_deals_position_nonnegative', sql`${t.position} >= 0`),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+export type CrmPipelineRow = typeof crmPipelines.$inferSelect;
+export type CrmPipelineStageRow = typeof crmPipelineStages.$inferSelect;
+export type CrmDealRow = typeof crmDeals.$inferSelect;

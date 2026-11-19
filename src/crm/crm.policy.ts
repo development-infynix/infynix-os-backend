@@ -15,4 +15,14 @@ export class CrmPolicy {
     if (!a) return false;
     return (await this.access.keysFor(a.user)).includes('crm');
   }
+
+  /**
+   * Who may shape the board (pipelines and stages). Staff can work inside a
+   * pipeline but never rename or delete the board itself.
+   */
+  async manage(a: Actor | null): Promise<boolean> {
+    if (!a) return false;
+    if (a.user.role !== 'owner' && a.user.role !== 'manager') return false;
+    return this.use(a);
+  }
 }

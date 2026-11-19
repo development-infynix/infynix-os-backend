@@ -19,5 +19,7 @@ import { ClientsService } from './clients.service.js';
     ClientImportsService,
     ClientPolicy,
   ],
+  // The CRM creates clients in the same transaction as a deal.
+  exports: [ClientsRepository, ClientsService],
 })
 export class ClientsModule {}
