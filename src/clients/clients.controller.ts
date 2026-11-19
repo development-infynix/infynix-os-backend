@@ -16,6 +16,7 @@ import type { Actor } from '../tenancy/tenancy.types.js';
 import { ClientPolicy } from './client.policy.js';
 import { ClientsService } from './clients.service.js';
 import {
+  ClientIdsQuery,
   CreateClientDto,
   DeleteClientsDto,
   ImportClientsDto,
@@ -32,6 +33,13 @@ export class ClientsController {
   @Can(ClientPolicy, 'use')
   list(@CurrentActor() actor: Actor, @Query() query: ListClientsQuery) {
     return this.clients.list(actor, query.page, query.pageSize, query.q, query.importId);
+  }
+
+  /** Every client id from one import. Declared before `:id` so "ids" isn't read as an id. */
+  @Get('ids')
+  @Can(ClientPolicy, 'use')
+  async ids(@CurrentActor() actor: Actor, @Query() query: ClientIdsQuery) {
+    return { ids: await this.clients.idsForImport(actor, query.importId) };
   }
 
   @Get(':id')

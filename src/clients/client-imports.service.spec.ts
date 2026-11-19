@@ -46,6 +46,7 @@ describe('ClientImportsService', () => {
   const removeWithClients = vi.fn<ClientImportsRepository['removeWithClients']>();
   const exists = vi.fn<ClientImportsRepository['exists']>();
   const deleteClientChunk = vi.fn<ClientImportsRepository['deleteClientChunk']>();
+  const search = vi.fn<ClientImportsRepository['search']>();
   const run = vi.fn(
     (_tenantId: string, fn: (tx: TenantTx) => Promise<unknown>) => fn(tx),
   );
@@ -61,7 +62,7 @@ describe('ClientImportsService', () => {
     deleteClientChunk.mockResolvedValue({ deleted: 100, remaining: 20 });
     service = new ClientImportsService(
       { run } as unknown as TenantDb,
-      { create, list, find, removeWithClients, exists, deleteClientChunk } as unknown as ClientImportsRepository,
+      { create, list, find, removeWithClients, exists, deleteClientChunk, search } as unknown as ClientImportsRepository,
     );
   });
 
@@ -89,6 +90,23 @@ describe('ClientImportsService', () => {
   it('does not reveal imports of another tenant', async () => {
     find.mockResolvedValue(null);
     await expect(service.get(actor, 'other')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('pages the import search and says whether more remain', async () => {
+    search.mockResolvedValue({ items: [summary], total: 45 });
+    const query = { q: 'acme', page: 2, pageSize: 20, withClients: true };
+
+    await expect(service.search(actor, query)).resolves.toEqual({
+      items: [summary],
+      total: 45,
+      page: 2,
+      pageSize: 20,
+      hasMore: true,
+    });
+    expect(search).toHaveBeenCalledWith(tx, query);
+
+    search.mockResolvedValue({ items: [summary], total: 41 });
+    await expect(service.search(actor, { ...query, page: 3 })).resolves.toMatchObject({ hasMore: false });
   });
 
   it('removes an import together with its linked clients', async () => {

@@ -19,6 +19,7 @@ import {
   CreateClientImportDto,
   DeleteImportChunkQuery,
   ImportNameDto,
+  SearchImportsQuery,
 } from './dto/client-imports.dto.js';
 
 /** Admin › Clients imports: /api/v1/client-imports, behind the clients grant. */
@@ -37,6 +38,13 @@ export class ClientImportsController {
   @Can(ClientPolicy, 'use')
   list(@CurrentActor() actor: Actor) {
     return this.imports.list(actor);
+  }
+
+  /** Searchable, paged imports. Declared before `:id` so "search" isn't read as an id. */
+  @Get('search')
+  @Can(ClientPolicy, 'use')
+  search(@CurrentActor() actor: Actor, @Query() query: SearchImportsQuery) {
+    return this.imports.search(actor, query);
   }
 
   @Get(':id')

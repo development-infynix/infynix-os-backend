@@ -104,6 +104,12 @@ export class UpdateClientDto {
   customDetails?: Record<string, unknown>;
 }
 
+/** ?importId=…: every client id from one import (selection by import). */
+export class ClientIdsQuery {
+  @IsUUID()
+  importId: string;
+}
+
 /** ?page=1&pageSize=100&q=acme: one page of the company's clients. */
 export class ListClientsQuery {
   @IsOptional()

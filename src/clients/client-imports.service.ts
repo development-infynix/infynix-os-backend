@@ -3,7 +3,7 @@ import { TenantDb } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import type { ClientImport, ClientImportSummary } from './client-imports.repository.js';
 import { ClientImportsRepository } from './client-imports.repository.js';
-import type { CreateClientImportDto, ImportNameDto } from './dto/client-imports.dto.js';
+import type { CreateClientImportDto, ImportNameDto, SearchImportsQuery } from './dto/client-imports.dto.js';
 
 /** Import records inside the actor's own company (all through TenantDb). */
 @Injectable()
@@ -27,6 +27,20 @@ export class ClientImportsService {
 
   list(actor: Actor): Promise<ClientImportSummary[]> {
     return this.tenantDb.run(actor.tenant.id, (tx) => this.imports.list(tx));
+  }
+
+  /** A page of imports for the selection menu: searchable, newest first. */
+  async search(actor: Actor, query: SearchImportsQuery) {
+    const { items, total } = await this.tenantDb.run(actor.tenant.id, (tx) =>
+      this.imports.search(tx, query),
+    );
+    return {
+      items,
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+      hasMore: query.page * query.pageSize < total,
+    };
   }
 
   async get(actor: Actor, id: string): Promise<ClientImport> {

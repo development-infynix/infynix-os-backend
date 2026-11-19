@@ -45,6 +45,11 @@ export class ClientsService {
   ) {}
 
   /** One page of the company's clients, with what the table footer needs. */
+  /** Client ids from one import, for "Select imports" on the Clients page. */
+  idsForImport(actor: Actor, importId: string): Promise<string[]> {
+    return this.tenantDb.run(actor.tenant.id, (tx) => this.clients.idsForImport(tx, importId));
+  }
+
   async list(actor: Actor, page: number, pageSize: number, q?: string, importId?: string) {
     const { items, total } = await this.tenantDb.run(actor.tenant.id, (tx) =>
       this.clients.page(tx, page, pageSize, q, importId),

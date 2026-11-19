@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { count, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { ClientImportRow } from '../db/schema.js';
 import { clientImports, clients } from '../db/schema.js';
 import type { TenantTx } from '../db/tenant-db.js';
@@ -55,6 +55,34 @@ export class ClientImportsRepository {
       .select(summaryColumns)
       .from(clientImports)
       .orderBy(desc(clientImports.createdAt), desc(clientImports.id));
+  }
+
+  /** One page of imports, newest first, matching the name or file name. */
+  async search(
+    tx: TenantTx,
+    options: { q?: string; page: number; pageSize: number; withClients: boolean },
+  ): Promise<{ items: ClientImportSummary[]; total: number }> {
+    const conditions: SQL[] = [];
+    const term = options.q?.trim();
+    if (term) {
+      // % and _ in the search are literal characters, not wildcards.
+      const pattern = `%${term.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+      conditions.push(or(ilike(clientImports.name, pattern), ilike(clientImports.fileName, pattern))!);
+    }
+    if (options.withClients) conditions.push(gt(clientImports.createdCount, 0));
+    const where = conditions.length ? and(...conditions) : undefined;
+
+    const [items, [{ total }]] = await Promise.all([
+      tx
+        .select(summaryColumns)
+        .from(clientImports)
+        .where(where)
+        .orderBy(desc(clientImports.createdAt), desc(clientImports.id))
+        .limit(options.pageSize)
+        .offset((options.page - 1) * options.pageSize),
+      tx.select({ total: count() }).from(clientImports).where(where),
+    ]);
+    return { items, total };
   }
 
   async find(tx: TenantTx, id: string): Promise<ClientImport | null> {

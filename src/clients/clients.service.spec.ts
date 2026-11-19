@@ -61,6 +61,7 @@ describe('ClientsService', () => {
   const create = vi.fn<ClientsRepository['create']>();
   const update = vi.fn<ClientsRepository['update']>();
   const remove = vi.fn<ClientsRepository['remove']>();
+  const idsForImport = vi.fn<ClientsRepository['idsForImport']>();
   const findImport = vi.fn<ClientImportsRepository['find']>();
   const recordChunk = vi.fn<ClientImportsRepository['recordChunk']>();
   const importExists = vi.fn<ClientImportsRepository['exists']>();
@@ -88,9 +89,17 @@ describe('ClientsService', () => {
     createMany.mockImplementation(async (_tx, data) => data.length);
     service = new ClientsService(
       { run } as unknown as TenantDb,
-      { find, create, createMany, update, remove } as unknown as ClientsRepository,
+      { find, create, createMany, update, remove, idsForImport } as unknown as ClientsRepository,
       { find: findImport, exists: importExists, recordChunk } as unknown as ClientImportsRepository,
     );
+  });
+
+  it('lists the client ids of one import inside the actor tenant', async () => {
+    idsForImport.mockResolvedValue(['c1', 'c2']);
+
+    await expect(service.idsForImport(actor, 'i1')).resolves.toEqual(['c1', 'c2']);
+    expect(run).toHaveBeenCalledWith('t1', expect.any(Function));
+    expect(idsForImport).toHaveBeenCalledWith(tx, 'i1');
   });
 
   it('creates in the actor tenant, normalizing contacts and keeping customDetails', async () => {

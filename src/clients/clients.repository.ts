@@ -96,6 +96,16 @@ export class ClientsRepository {
     return row ?? null;
   }
 
+  /** Every client id that came from one import (selection by import). */
+  async idsForImport(tx: TenantTx, importId: string): Promise<string[]> {
+    const rows = await tx
+      .select({ id: clients.id })
+      .from(clients)
+      .where(eq(clients.importId, importId))
+      .orderBy(desc(clients.createdAt), desc(clients.id));
+    return rows.map((row) => row.id);
+  }
+
   async findByIds(tx: TenantTx, ids: string[]): Promise<Client[]> {
     if (!ids.length) return [];
     return tx.select(clientColumns).from(clients).where(inArray(clients.id, ids));
