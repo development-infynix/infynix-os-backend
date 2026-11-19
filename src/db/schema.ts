@@ -148,9 +148,7 @@ export const userAccess = pgTable.withRLS(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
     accessItemId: uuid('access_item_id')
       .notNull()
       .references(() => accessItems.id, { onDelete: 'cascade' }),
@@ -163,6 +161,12 @@ export const userAccess = pgTable.withRLS(
     uniqueIndex('user_access_user_item_key').on(t.userId, t.accessItemId),
     index('user_access_tenant_idx').on(t.tenantId),
     index('user_access_user_idx').on(t.userId),
+    // The person must belong to the same company as the grant.
+    foreignKey({
+      name: 'user_access_user_fk',
+      columns: [t.tenantId, t.userId],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('cascade'),
     tenantIsolation(t.tenantId),
   ],
 );
@@ -224,6 +228,8 @@ export const clientImports = pgTable.withRLS(
   },
   (t) => [
     index('client_imports_tenant_id_idx').on(t.tenantId),
+    // Target for same-company foreign keys (clients.import_id).
+    uniqueIndex('client_imports_tenant_id_id_key').on(t.tenantId, t.id),
     check('client_imports_row_count_max', sql`${t.rowCount} <= 500`),
     check('client_imports_name_not_blank', sql`length(btrim(${t.name})) > 0`),
     check('client_imports_file_name_not_blank', sql`length(btrim(${t.fileName})) > 0`),
@@ -243,9 +249,7 @@ export const clients = pgTable.withRLS(
     email: text(),
     phone: text(),
     /** Null for clients created before imports or added one by one. */
-    importId: uuid('import_id').references((): AnyPgColumn => clientImports.id, {
-      onDelete: 'set null',
-    }),
+    importId: uuid('import_id'),
     customDetails: jsonb('custom_details')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -259,6 +263,15 @@ export const clients = pgTable.withRLS(
   (t) => [
     index('clients_tenant_id_idx').on(t.tenantId),
     index('clients_import_id_idx').on(t.importId),
+    // The import must belong to the same company. Deleting an import clears
+    // only import_id: the migration writes ON DELETE SET NULL ("import_id")
+    // (Postgres 15+), which drizzle can't express; plain SET NULL would also
+    // null tenant_id, which can't be null. A null import_id always passes.
+    foreignKey({
+      name: 'clients_import_fk',
+      columns: [t.tenantId, t.importId],
+      foreignColumns: [clientImports.tenantId, clientImports.id],
+    }).onDelete('set null'),
     // Lets the CRM reference a client through (tenant_id, id), so a deal can
     // never point at another company's client even if RLS is bypassed.
     uniqueIndex('clients_tenant_id_id_key').on(t.tenantId, t.id),
