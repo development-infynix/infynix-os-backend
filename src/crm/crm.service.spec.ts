@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Client, ClientsRepository } from '../clients/clients.repository.js';
 import type { TenantDb, TenantTx } from '../db/tenant-db.js';
@@ -27,6 +27,9 @@ const actor: Actor = {
   },
   tenant: { id: 't1', name: 'Acme', status: 'active', plan: 'free', createdAt: new Date() },
 };
+
+/** Someone with the CRM grant who isn't the owner: pipeline access applies to them. */
+const staff: Actor = { ...actor, user: { ...actor.user, id: 'u2', role: 'staff' } };
 
 const tx = {} as TenantTx;
 
@@ -100,6 +103,13 @@ describe('CrmService', () => {
   const dealCard = vi.fn<CrmRepository['dealCard']>();
   const countDealsInStage = vi.fn<CrmRepository['countDealsInStage']>();
   const removeStage = vi.fn<CrmRepository['removeStage']>();
+  const countPipelines = vi.fn<CrmRepository['countPipelines']>();
+  const listPipelinesFor = vi.fn<CrmRepository['listPipelinesFor']>();
+  const isPipelineMember = vi.fn<CrmRepository['isPipelineMember']>();
+  const listCrmEligibleUsers = vi.fn<CrmRepository['listCrmEligibleUsers']>();
+  const addPipelineUsers = vi.fn<CrmRepository['addPipelineUsers']>();
+  const nextPipelinePosition = vi.fn<CrmRepository['nextPipelinePosition']>();
+  const dealCardsForStage = vi.fn<CrmRepository['dealCardsForStage']>();
   const findClient = vi.fn<ClientsRepository['find']>();
   const createClient = vi.fn<ClientsRepository['create']>();
   let service: CrmService;
@@ -128,6 +138,17 @@ describe('CrmService', () => {
     });
     dealCard.mockResolvedValue(card());
     countDealsInStage.mockResolvedValue(0);
+    countPipelines.mockResolvedValue(1);
+    listPipelinesFor.mockResolvedValue([pipeline()]);
+    isPipelineMember.mockResolvedValue(true);
+    listCrmEligibleUsers.mockResolvedValue([
+      { id: 'u2', fullName: 'Asha', email: 'asha@acme.test' },
+      { id: 'u3', fullName: 'Ben', email: 'ben@acme.test' },
+    ]);
+    addPipelineUsers.mockResolvedValue(undefined);
+    nextPipelinePosition.mockResolvedValue(1);
+    dealCardsForStage.mockResolvedValue([]);
+    createPipeline.mockResolvedValue(pipeline({ id: 'p2', name: 'Partners', position: 1 }));
     findClient.mockResolvedValue(client());
     createClient.mockResolvedValue(client());
     service = new CrmService(
@@ -151,13 +172,20 @@ describe('CrmService', () => {
         dealCard,
         countDealsInStage,
         removeStage,
+        countPipelines,
+        listPipelinesFor,
+        isPipelineMember,
+        listCrmEligibleUsers,
+        addPipelineUsers,
+        nextPipelinePosition,
+        dealCardsForStage,
       } as unknown as CrmRepository,
       { find: findClient, create: createClient } as unknown as ClientsRepository,
     );
   });
 
   it('seeds the default Sales pipeline the first time the CRM is opened', async () => {
-    listPipelines.mockResolvedValueOnce([]);
+    countPipelines.mockResolvedValue(0);
 
     const result = await service.listPipelines(actor);
 
@@ -172,6 +200,11 @@ describe('CrmService', () => {
         expect.objectContaining({ pipelineId: 'p1', name: 'Lost', position: 5 }),
       ]),
     );
+    // Everyone who can use the CRM today gets access to the seeded board.
+    expect(addPipelineUsers).toHaveBeenCalledWith(tx, [
+      { tenantId: 't1', pipelineId: 'p1', userId: 'u2', grantedBy: null },
+      { tenantId: 't1', pipelineId: 'p1', userId: 'u3', grantedBy: null },
+    ]);
     expect(result).toEqual([
       {
         id: 'p1',
@@ -327,5 +360,83 @@ describe('CrmService', () => {
       ConflictException,
     );
     expect(removeStage).not.toHaveBeenCalled();
+  });
+
+  /* ── Pipeline access ─────────────────────────────────────────────────── */
+
+  it('lists every pipeline for the owner and only memberships for everyone else', async () => {
+    await service.listPipelines(actor);
+    expect(listPipelinesFor).toHaveBeenLastCalledWith(tx, null);
+
+    await service.listPipelines(staff);
+    expect(listPipelinesFor).toHaveBeenLastCalledWith(tx, 'u2');
+  });
+
+  it('does not seed a second board when the person just sees no pipelines', async () => {
+    countPipelines.mockResolvedValue(3);
+    listPipelinesFor.mockResolvedValue([]);
+
+    await expect(service.listPipelines(staff)).resolves.toEqual([]);
+    expect(createPipelineIfAbsent).not.toHaveBeenCalled();
+  });
+
+  it('never checks membership for the owner', async () => {
+    await service.board(actor, 'p1', 100);
+    expect(isPipelineMember).not.toHaveBeenCalled();
+  });
+
+  it('reports pipelines, stages and deals outside your access as not found', async () => {
+    isPipelineMember.mockResolvedValue(false);
+    findDeal.mockResolvedValue({
+      id: 'd1',
+      tenantId: 't1',
+      pipelineId: 'p1',
+      stageId: 's1',
+      clientId: 'c1',
+      position: 0,
+      createdBy: 'u1',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(service.board(staff, 'p1', 100)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.searchDeals(staff, 'p1', 'acme', 20)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.deleteStage(staff, 's1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.getDeal(staff, 'd1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.moveDeal(staff, 'd1', { stageId: 's1' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.deleteDeal(staff, 'd1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.createDeal(staff, { pipelineId: 'p1', clientId: 'c1' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(isPipelineMember).toHaveBeenCalledWith(tx, 'p1', 'u2');
+    expect(removeStage).not.toHaveBeenCalled();
+    expect(moveDeal).not.toHaveBeenCalled();
+    expect(removeDeal).not.toHaveBeenCalled();
+    expect(createDeal).not.toHaveBeenCalled();
+  });
+
+  it('saves the chosen people as the access list of the new pipeline', async () => {
+    await service.createPipeline(actor, { name: 'Partners', stages: ['Intro'], userIds: ['u2', 'u3', 'u2'] });
+
+    expect(addPipelineUsers).toHaveBeenCalledWith(tx, [
+      { tenantId: 't1', pipelineId: 'p2', userId: 'u2', grantedBy: 'u1' },
+      { tenantId: 't1', pipelineId: 'p2', userId: 'u3', grantedBy: 'u1' },
+    ]);
+  });
+
+  it('refuses access for someone without the CRM grant', async () => {
+    await expect(
+      service.createPipeline(actor, { name: 'Partners', stages: ['Intro'], userIds: ['u2', 'u9'] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(createPipeline).not.toHaveBeenCalled();
+    expect(addPipelineUsers).not.toHaveBeenCalled();
+  });
+
+  it('creates a pipeline with no one on it when nobody is chosen', async () => {
+    await service.createPipeline(actor, { name: 'Partners', stages: ['Intro'] });
+
+    expect(listCrmEligibleUsers).not.toHaveBeenCalled();
+    expect(createPipeline).toHaveBeenCalled();
+    expect(addPipelineUsers).toHaveBeenCalledWith(tx, []);
   });
 });

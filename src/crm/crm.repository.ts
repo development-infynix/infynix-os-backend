@@ -7,16 +7,21 @@ import {
   eq,
   ilike,
   inArray,
+  ne,
   or,
   sql,
   type SQL,
 } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
 import {
+  accessItems,
   clients,
   crmDeals,
   crmPipelineStages,
+  crmPipelineUsers,
   crmPipelines,
+  userAccess,
+  users,
 } from '../db/schema.js';
 
 export interface CrmPipeline {
@@ -48,6 +53,13 @@ export interface CrmDeal {
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** Someone who can be given pipeline access: active, not the owner, with the `crm` grant. */
+export interface CrmEligibleUser {
+  id: string;
+  fullName: string;
+  email: string;
 }
 
 /** A deal plus the client fields a kanban card shows. */
@@ -118,6 +130,66 @@ export class CrmRepository {
       .select(pipelineColumns)
       .from(crmPipelines)
       .orderBy(asc(crmPipelines.position), asc(crmPipelines.id));
+  }
+
+  /** The pipelines this person may see: all of them for `null` (owners), else their memberships. */
+  listPipelinesFor(tx: TenantTx, userId: string | null): Promise<CrmPipeline[]> {
+    if (userId === null) return this.listPipelines(tx);
+    return tx
+      .select(pipelineColumns)
+      .from(crmPipelines)
+      .innerJoin(
+        crmPipelineUsers,
+        and(
+          eq(crmPipelineUsers.pipelineId, crmPipelines.id),
+          eq(crmPipelineUsers.userId, userId),
+        ),
+      )
+      .orderBy(asc(crmPipelines.position), asc(crmPipelines.id));
+  }
+
+  async isPipelineMember(
+    tx: TenantTx,
+    pipelineId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const [row] = await tx
+      .select({ userId: crmPipelineUsers.userId })
+      .from(crmPipelineUsers)
+      .where(
+        and(
+          eq(crmPipelineUsers.pipelineId, pipelineId),
+          eq(crmPipelineUsers.userId, userId),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  /** Active, non-owner people with the `crm` menu grant, by name. */
+  listCrmEligibleUsers(tx: TenantTx): Promise<CrmEligibleUser[]> {
+    return tx
+      .select({ id: users.id, fullName: users.fullName, email: users.email })
+      .from(users)
+      .innerJoin(userAccess, eq(userAccess.userId, users.id))
+      .innerJoin(
+        accessItems,
+        and(
+          eq(accessItems.id, userAccess.accessItemId),
+          eq(accessItems.key, 'crm'),
+          eq(accessItems.isActive, true),
+        ),
+      )
+      .where(and(eq(users.isActive, true), ne(users.role, 'owner')))
+      .orderBy(asc(users.fullName), asc(users.id));
+  }
+
+  async addPipelineUsers(
+    tx: TenantTx,
+    rows: { tenantId: string; pipelineId: string; userId: string; grantedBy: string | null }[],
+  ): Promise<void> {
+    if (!rows.length) return;
+    await tx.insert(crmPipelineUsers).values(rows).onConflictDoNothing();
   }
 
   countPipelines(tx: TenantTx): Promise<number> {

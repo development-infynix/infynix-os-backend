@@ -11,6 +11,7 @@ import { TenantDb, type TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import {
   type CrmDealCard,
+  type CrmEligibleUser,
   type CrmPipeline,
   type CrmStage,
   CrmRepository,
@@ -39,6 +40,7 @@ const DEFAULT_STAGES = [
 const PIPELINE_NAME_IN_USE = 'A pipeline with that name already exists';
 const STAGE_NAME_IN_USE = 'A stage with that name already exists in this pipeline';
 const CLIENT_ALREADY_IN_PIPELINE = 'This client is already in this pipeline';
+const NOT_ELIGIBLE = 'Only people with CRM access can be added to a pipeline';
 
 export interface StageResponse {
   id: string;
@@ -85,14 +87,18 @@ export class CrmService {
 
   /* ── Pipelines ────────────────────────────────────────────────────────── */
 
-  /** Pipelines and their stages; seeds the default Sales board on first use. */
+  /**
+   * The pipelines this person may see, with their stages. Seeds the default
+   * Sales board the first time the company opens the CRM: decided on the
+   * company's pipelines, not this person's, so someone on no pipeline never
+   * causes a second Sales board.
+   */
   async listPipelines(actor: Actor): Promise<PipelineResponse[]> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      let pipelines = await this.crm.listPipelines(tx);
-      if (!pipelines.length) {
+      if ((await this.crm.countPipelines(tx)) === 0) {
         await this.seedDefaultPipeline(tx, actor.tenant.id);
-        pipelines = await this.crm.listPipelines(tx);
       }
+      const pipelines = await this.crm.listPipelinesFor(tx, this.memberId(actor));
       const stages = await this.crm.listStages(
         tx,
         pipelines.map((pipeline) => pipeline.id),
@@ -114,14 +120,32 @@ export class CrmService {
     dto: CreatePipelineDto,
   ): Promise<PipelineResponse> {
     const names = this.stageNames(dto.stages);
+    const userIds = [...new Set(dto.userIds ?? [])];
     try {
       return await this.tenantDb.run(actor.tenant.id, async (tx) => {
+        if (userIds.length) {
+          const eligible = new Set(
+            (await this.crm.listCrmEligibleUsers(tx)).map((user) => user.id),
+          );
+          if (userIds.some((id) => !eligible.has(id))) {
+            throw new BadRequestException(NOT_ELIGIBLE);
+          }
+        }
         const position = await this.crm.nextPipelinePosition(tx);
         const pipeline = await this.crm.createPipeline(tx, {
           tenantId: actor.tenant.id,
           name: dto.name,
           position,
         });
+        await this.crm.addPipelineUsers(
+          tx,
+          userIds.map((userId) => ({
+            tenantId: actor.tenant.id,
+            pipelineId: pipeline.id,
+            userId,
+            grantedBy: actor.user.id,
+          })),
+        );
         const stages = await this.crm.createStages(
           tx,
           names.map((name, index) => ({
@@ -139,6 +163,11 @@ export class CrmService {
     }
   }
 
+  /** People who can be given access to a pipeline (step 3 of the wizard). */
+  eligibleUsers(actor: Actor): Promise<CrmEligibleUser[]> {
+    return this.tenantDb.run(actor.tenant.id, (tx) => this.crm.listCrmEligibleUsers(tx));
+  }
+
   async updatePipeline(
     actor: Actor,
     id: string,
@@ -146,7 +175,7 @@ export class CrmService {
   ): Promise<PipelineResponse> {
     try {
       return await this.tenantDb.run(actor.tenant.id, async (tx) => {
-        const pipeline = await this.findPipelineOrFail(tx, id);
+        const pipeline = await this.findPipelineOrFail(tx, actor, id);
         const updated =
           dto.name === undefined && dto.position === undefined
             ? pipeline
@@ -163,7 +192,7 @@ export class CrmService {
   /** What the delete confirmation shows: stages and deals that will go. */
   getDeleteImpact(actor: Actor, id: string) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      await this.findPipelineOrFail(tx, id);
+      await this.findPipelineOrFail(tx, actor, id);
       const [dealCount, stageCount] = await Promise.all([
         this.crm.countDealsInPipeline(tx, id),
         this.crm.countStagesInPipeline(tx, id),
@@ -173,12 +202,12 @@ export class CrmService {
   }
 
   /**
-   * Deletes the pipeline with its deals, stages and (later) access list.
+   * Deletes the pipeline with its deals, stages and access list.
    * Clients are never touched. Deals go first because their FKs are RESTRICT.
    */
   async deletePipeline(actor: Actor, id: string): Promise<void> {
     await this.tenantDb.run(actor.tenant.id, async (tx) => {
-      await this.findPipelineOrFail(tx, id);
+      await this.findPipelineOrFail(tx, actor, id);
       await this.crm.removeDealsForPipeline(tx, id);
       await this.crm.removePipeline(tx, id);
     });
@@ -193,7 +222,7 @@ export class CrmService {
   ): Promise<StageResponse> {
     try {
       return await this.tenantDb.run(actor.tenant.id, async (tx) => {
-        await this.findPipelineOrFail(tx, pipelineId);
+        await this.findPipelineOrFail(tx, actor, pipelineId);
         const position = await this.crm.nextStagePosition(tx, pipelineId);
         const stage = await this.crm.createStage(tx, {
           tenantId: actor.tenant.id,
@@ -216,7 +245,7 @@ export class CrmService {
   ): Promise<StageResponse> {
     try {
       return await this.tenantDb.run(actor.tenant.id, async (tx) => {
-        const stage = await this.findStageOrFail(tx, id);
+        const stage = await this.findStageOrFail(tx, actor, id);
         const updated =
           dto.name === undefined && dto.position === undefined
             ? stage
@@ -236,7 +265,7 @@ export class CrmService {
     stageIds: string[],
   ): Promise<StageResponse[]> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      await this.findPipelineOrFail(tx, pipelineId);
+      await this.findPipelineOrFail(tx, actor, pipelineId);
       const stages = await this.crm.findPipelineStages(tx, pipelineId);
       const current = new Set(stages.map((stage) => stage.id));
       if (
@@ -261,7 +290,7 @@ export class CrmService {
 
   async deleteStage(actor: Actor, id: string): Promise<void> {
     await this.tenantDb.run(actor.tenant.id, async (tx) => {
-      await this.findStageOrFail(tx, id);
+      await this.findStageOrFail(tx, actor, id);
       const deals = await this.crm.countDealsInStage(tx, id);
       if (deals > 0) {
         throw new ConflictException(
@@ -280,7 +309,7 @@ export class CrmService {
    */
   async board(actor: Actor, pipelineId: string, limit: number) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const pipeline = await this.findPipelineOrFail(tx, pipelineId);
+      const pipeline = await this.findPipelineOrFail(tx, actor, pipelineId);
       const stages = await this.crm.findPipelineStages(tx, pipelineId);
       const columns: Record<string, CrmDealCard[]> = {};
       const totals: Record<string, number> = {};
@@ -306,7 +335,9 @@ export class CrmService {
   async getDeal(actor: Actor, id: string): Promise<CrmDealCard> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const card = await this.crm.dealCard(tx, id);
-      if (!card) throw new NotFoundException('Deal not found');
+      if (!card || !(await this.canSee(tx, actor, card.pipelineId))) {
+        throw new NotFoundException('Deal not found');
+      }
       return card;
     });
   }
@@ -314,7 +345,7 @@ export class CrmService {
   /** Search the current pipeline by client name, email or phone. */
   async searchDeals(actor: Actor, pipelineId: string, q: string, limit: number) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      await this.findPipelineOrFail(tx, pipelineId);
+      await this.findPipelineOrFail(tx, actor, pipelineId);
       const term = q.trim();
       if (!term) return { items: [] };
       return { items: await this.crm.searchDeals(tx, pipelineId, term, limit) };
@@ -329,7 +360,7 @@ export class CrmService {
   async createDeal(actor: Actor, dto: CreateDealDto): Promise<CrmDealCard> {
     try {
       return await this.tenantDb.run(actor.tenant.id, async (tx) => {
-        const pipeline = await this.findPipelineOrFail(tx, dto.pipelineId);
+        const pipeline = await this.findPipelineOrFail(tx, actor, dto.pipelineId);
         const stages = await this.crm.findPipelineStages(tx, pipeline.id);
         const stage = dto.stageId
           ? stages.find((item) => item.id === dto.stageId)
@@ -375,7 +406,9 @@ export class CrmService {
   ): Promise<CrmDealCard> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const deal = await this.crm.findDeal(tx, id);
-      if (!deal) throw new NotFoundException('Deal not found');
+      if (!deal || !(await this.canSee(tx, actor, deal.pipelineId))) {
+        throw new NotFoundException('Deal not found');
+      }
       const stage = await this.crm.findStage(tx, dto.stageId);
       if (!stage || stage.pipelineId !== deal.pipelineId) {
         throw new BadRequestException('Stage does not belong to this pipeline');
@@ -411,7 +444,9 @@ export class CrmService {
   async deleteDeal(actor: Actor, id: string): Promise<void> {
     await this.tenantDb.run(actor.tenant.id, async (tx) => {
       const deal = await this.crm.findDeal(tx, id);
-      if (!deal) throw new NotFoundException('Deal not found');
+      if (!deal || !(await this.canSee(tx, actor, deal.pipelineId))) {
+        throw new NotFoundException('Deal not found');
+      }
       await this.crm.removeDeal(tx, id);
     });
   }
@@ -463,6 +498,17 @@ export class CrmService {
         position,
       })),
     );
+    // Same rule as the access backfill: everyone who can use the CRM today.
+    const eligible = await this.crm.listCrmEligibleUsers(tx);
+    await this.crm.addPipelineUsers(
+      tx,
+      eligible.map((user) => ({
+        tenantId,
+        pipelineId: pipeline.id,
+        userId: user.id,
+        grantedBy: null,
+      })),
+    );
   }
 
   private stageNames(input?: string[]): string[] {
@@ -481,18 +527,39 @@ export class CrmService {
     return names;
   }
 
+  /** Null for owners (they see every pipeline), otherwise the person's own id. */
+  private memberId(actor: Actor): string | null {
+    return actor.user.role === 'owner' ? null : actor.user.id;
+  }
+
+  /** Pipeline access: owners always; everyone else needs a membership row. */
+  private async canSee(tx: TenantTx, actor: Actor, pipelineId: string): Promise<boolean> {
+    const userId = this.memberId(actor);
+    return userId === null || this.crm.isPipelineMember(tx, pipelineId, userId);
+  }
+
+  /**
+   * The pipeline, if this person may see it. A pipeline they have no access
+   * to is reported as not found, so its existence doesn't leak.
+   */
   private async findPipelineOrFail(
     tx: TenantTx,
+    actor: Actor,
     id: string,
   ): Promise<CrmPipeline> {
     const pipeline = await this.crm.findPipeline(tx, id);
-    if (!pipeline) throw new NotFoundException('Pipeline not found');
+    if (!pipeline || !(await this.canSee(tx, actor, pipeline.id))) {
+      throw new NotFoundException('Pipeline not found');
+    }
     return pipeline;
   }
 
-  private async findStageOrFail(tx: TenantTx, id: string): Promise<CrmStage> {
+  /** The stage, if this person may see its pipeline. */
+  private async findStageOrFail(tx: TenantTx, actor: Actor, id: string): Promise<CrmStage> {
     const stage = await this.crm.findStage(tx, id);
-    if (!stage) throw new NotFoundException('Stage not found');
+    if (!stage || !(await this.canSee(tx, actor, stage.pipelineId))) {
+      throw new NotFoundException('Stage not found');
+    }
     return stage;
   }
 }

@@ -1,0 +1,390 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "94120d97-a40d-41b7-9cfc-d587ad5b4351",
+  "prevIds": [
+    "2bb66bf3-eeed-43e4-b0a3-d70baae453de"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "crm_pipeline_users"
+      ],
+      "writes": [
+        "s|tbl|public.crm_pipeline_users",
+        "n|tbl|public.crm_pipeline_users",
+        "e|tbl|public.crm_pipeline_users",
+        "n|rel|public.crm_pipeline_users",
+        "n|type|public.crm_pipeline_users",
+        "n|rel|public.crm_pipeline_users_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "crm_pipeline_users",
+        "crm_pipeline_users_user_idx"
+      ],
+      "writes": [
+        "s|idx|public.crm_pipeline_users_user_idx",
+        "n|idx|public.crm_pipeline_users_user_idx",
+        "e|idx|public.crm_pipeline_users_user_idx",
+        "n|rel|public.crm_pipeline_users_user_idx"
+      ],
+      "reads": [
+        "n|tbl|public.crm_pipeline_users",
+        "n|sch|public",
+        "n|col|public.crm_pipeline_users.user_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "crm_pipeline_users"
+      ],
+      "writes": [
+        "s|fk|public.crm_pipeline_users.crm_pipeline_users_tenant_id_tenants_id_fkey",
+        "n|fk|public.crm_pipeline_users.crm_pipeline_users_tenant_id_tenants_id_fkey",
+        "e|fk|public.crm_pipeline_users.crm_pipeline_users_tenant_id_tenants_id_fkey",
+        "n|con|public.crm_pipeline_users.crm_pipeline_users_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.crm_pipeline_users",
+        "n|sch|public",
+        "n|tbl|public.tenants",
+        "n|sch|public",
+        "n|col|public.crm_pipeline_users.tenant_id",
+        "n|col|public.tenants.id",
+        "e|uniqueness|public.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "crm_pipeline_users"
+      ],
+      "writes": [
+        "s|fk|public.crm_pipeline_users.crm_pipeline_users_user_id_users_id_fkey",
+        "n|fk|public.crm_pipeline_users.crm_pipeline_users_user_id_users_id_fkey",
+        "e|fk|public.crm_pipeline_users.crm_pipeline_users_user_id_users_id_fkey",
+        "n|con|public.crm_pipeline_users.crm_pipeline_users_user_id_users_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.crm_pipeline_users",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.crm_pipeline_users.user_id",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "crm_pipeline_users"
+      ],
+      "writes": [
+        "s|fk|public.crm_pipeline_users.crm_pipeline_users_granted_by_users_id_fkey",
+        "n|fk|public.crm_pipeline_users.crm_pipeline_users_granted_by_users_id_fkey",
+        "e|fk|public.crm_pipeline_users.crm_pipeline_users_granted_by_users_id_fkey",
+        "n|con|public.crm_pipeline_users.crm_pipeline_users_granted_by_users_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.crm_pipeline_users",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.crm_pipeline_users.granted_by",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "crm_pipeline_users"
+      ],
+      "writes": [
+        "s|fk|public.crm_pipeline_users.crm_pipeline_users_pipeline_fk",
+        "n|fk|public.crm_pipeline_users.crm_pipeline_users_pipeline_fk",
+        "e|fk|public.crm_pipeline_users.crm_pipeline_users_pipeline_fk",
+        "n|con|public.crm_pipeline_users.crm_pipeline_users_pipeline_fk"
+      ],
+      "reads": [
+        "n|tbl|public.crm_pipeline_users",
+        "n|sch|public",
+        "n|tbl|public.crm_pipelines",
+        "n|sch|public",
+        "n|col|public.crm_pipeline_users.tenant_id",
+        "n|col|public.crm_pipeline_users.pipeline_id",
+        "n|col|public.crm_pipelines.tenant_id",
+        "n|col|public.crm_pipelines.id",
+        "e|uniqueness|public.crm_pipelines.id.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "public",
+        "crm_pipeline_users"
+      ],
+      "writes": [
+        "s|pol|public.crm_pipeline_users.tenant_isolation",
+        "n|pol|public.crm_pipeline_users.tenant_isolation",
+        "e|pol|public.crm_pipeline_users.tenant_isolation"
+      ],
+      "reads": [
+        "n|tbl|public.crm_pipeline_users",
+        "n|sch|public",
+        "n|role|infynix_tenant",
+        "e|rls|public.crm_pipeline_users"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "crm_pipeline_users",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "pipeline_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "user_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "granted_by",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "crm_pipeline_users_user_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "crm_pipeline_users_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "crm_pipeline_users_user_id_users_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "user_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "crm_pipeline_users_granted_by_users_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "granted_by"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "crm_pipeline_users_pipeline_fk",
+        "nameExplicit": true,
+        "columns": [
+          "tenant_id",
+          "pipeline_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "crm_pipelines",
+        "columnsTo": [
+          "tenant_id",
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "crm_pipeline_users_pkey",
+        "columns": [
+          "pipeline_id",
+          "user_id"
+        ],
+        "nameExplicit": true,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "crm_pipeline_users",
+        "name": "tenant_isolation",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "infynix_tenant"
+        ],
+        "using": "\"crm_pipeline_users\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "withCheck": "\"crm_pipeline_users\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

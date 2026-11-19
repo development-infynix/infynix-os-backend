@@ -44,6 +44,13 @@ export class CrmController {
     return this.crm.listPipelines(actor);
   }
 
+  /** People who can be given pipeline access: step 3 of the create-pipeline wizard. */
+  @Get('pipelines/eligible-users')
+  @Can(CrmPolicy, 'manage')
+  eligibleUsers(@CurrentActor() actor: Actor) {
+    return this.crm.eligibleUsers(actor);
+  }
+
   @Post('pipelines')
   @Can(CrmPolicy, 'manage')
   createPipeline(@CurrentActor() actor: Actor, @Body() dto: CreatePipelineDto) {

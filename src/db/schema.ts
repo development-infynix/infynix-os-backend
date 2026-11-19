@@ -11,6 +11,7 @@ import {
   pgPolicy,
   pgRole,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -406,6 +407,38 @@ export const crmDeals = pgTable.withRLS(
       foreignColumns: [clients.tenantId, clients.id],
     }).onDelete('cascade'),
     check('crm_deals_position_nonnegative', sql`${t.position} >= 0`),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+/**
+ * Pipeline access: who may see and work in a pipeline. Owners never have rows
+ * (they see every pipeline); everyone else needs one, on top of the `crm` menu
+ * grant. Deal assignment will later draw its candidates from this list.
+ */
+export const crmPipelineUsers = pgTable.withRLS(
+  'crm_pipeline_users',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    pipelineId: uuid('pipeline_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references((): AnyPgColumn => users.id, { onDelete: 'cascade' }),
+    grantedBy: uuid('granted_by').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'crm_pipeline_users_pkey', columns: [t.pipelineId, t.userId] }),
+    index('crm_pipeline_users_user_idx').on(t.userId),
+    foreignKey({
+      name: 'crm_pipeline_users_pipeline_fk',
+      columns: [t.tenantId, t.pipelineId],
+      foreignColumns: [crmPipelines.tenantId, crmPipelines.id],
+    }).onDelete('cascade'),
     tenantIsolation(t.tenantId),
   ],
 );

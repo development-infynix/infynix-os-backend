@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
   IsEmail,
   IsInt,
@@ -39,6 +40,17 @@ export class CreatePipelineDto {
       : value,
   )
   stages?: string[];
+
+  /**
+   * Pipeline access: people with the CRM menu grant who may see and work in
+   * this pipeline. Owners are never listed (they see every pipeline).
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  userIds?: string[];
 }
 
 export class UpdatePipelineDto {
