@@ -110,6 +110,14 @@ describe('CrmService', () => {
   const addPipelineUsers = vi.fn<CrmRepository['addPipelineUsers']>();
   const nextPipelinePosition = vi.fn<CrmRepository['nextPipelinePosition']>();
   const dealCardsForStage = vi.fn<CrmRepository['dealCardsForStage']>();
+  const updatePipeline = vi.fn<CrmRepository['updatePipeline']>();
+  const removePipeline = vi.fn<CrmRepository['removePipeline']>();
+  const removeDealsForPipeline = vi.fn<CrmRepository['removeDealsForPipeline']>();
+  const countDealsInPipeline = vi.fn<CrmRepository['countDealsInPipeline']>();
+  const countStagesInPipeline = vi.fn<CrmRepository['countStagesInPipeline']>();
+  const createStage = vi.fn<CrmRepository['createStage']>();
+  const nextStagePosition = vi.fn<CrmRepository['nextStagePosition']>();
+  const updateStage = vi.fn<CrmRepository['updateStage']>();
   const findClient = vi.fn<ClientsRepository['find']>();
   const createClient = vi.fn<ClientsRepository['create']>();
   let service: CrmService;
@@ -179,6 +187,14 @@ describe('CrmService', () => {
         addPipelineUsers,
         nextPipelinePosition,
         dealCardsForStage,
+        updatePipeline,
+        removePipeline,
+        removeDealsForPipeline,
+        countDealsInPipeline,
+        countStagesInPipeline,
+        createStage,
+        nextStagePosition,
+        updateStage,
       } as unknown as CrmRepository,
       { find: findClient, create: createClient } as unknown as ClientsRepository,
     );
@@ -413,6 +429,27 @@ describe('CrmService', () => {
     expect(moveDeal).not.toHaveBeenCalled();
     expect(removeDeal).not.toHaveBeenCalled();
     expect(createDeal).not.toHaveBeenCalled();
+  });
+
+  it('keeps managers off pipelines they are not on: shaping routes answer not found too', async () => {
+    const manager: Actor = { ...staff, user: { ...staff.user, role: 'manager' } };
+    isPipelineMember.mockResolvedValue(false);
+
+    await expect(service.updatePipeline(manager, 'p1', { name: 'Renamed' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.deletePipeline(manager, 'p1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.getDeleteImpact(manager, 'p1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.createStage(manager, 'p1', { name: 'Won' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.updateStage(manager, 's1', { name: 'Renamed' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.reorderStages(manager, 'p1', ['s1'])).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(isPipelineMember).toHaveBeenCalledWith(tx, 'p1', 'u2');
+    expect(updatePipeline).not.toHaveBeenCalled();
+    expect(removeDealsForPipeline).not.toHaveBeenCalled();
+    expect(removePipeline).not.toHaveBeenCalled();
+    expect(countDealsInPipeline).not.toHaveBeenCalled();
+    expect(countStagesInPipeline).not.toHaveBeenCalled();
+    expect(createStage).not.toHaveBeenCalled();
+    expect(updateStage).not.toHaveBeenCalled();
   });
 
   it('saves the chosen people as the access list of the new pipeline', async () => {

@@ -87,6 +87,8 @@ export const users = pgTable.withRLS(
   (t) => [
     uniqueIndex('users_email_lower_key').on(sql`lower(${t.email})`),
     index('users_tenant_id_idx').on(t.tenantId),
+    // Target for same-company foreign keys (e.g. pipeline access rows).
+    uniqueIndex('users_tenant_id_id_key').on(t.tenantId, t.id),
     tenantIsolation(t.tenantId),
   ],
 );
@@ -423,9 +425,7 @@ export const crmPipelineUsers = pgTable.withRLS(
       .notNull()
       .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
     pipelineId: uuid('pipeline_id').notNull(),
-    userId: uuid('user_id')
-      .notNull()
-      .references((): AnyPgColumn => users.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
     grantedBy: uuid('granted_by').references((): AnyPgColumn => users.id, {
       onDelete: 'set null',
     }),
@@ -438,6 +438,12 @@ export const crmPipelineUsers = pgTable.withRLS(
       name: 'crm_pipeline_users_pipeline_fk',
       columns: [t.tenantId, t.pipelineId],
       foreignColumns: [crmPipelines.tenantId, crmPipelines.id],
+    }).onDelete('cascade'),
+    // The person must belong to the same company as the pipeline.
+    foreignKey({
+      name: 'crm_pipeline_users_user_fk',
+      columns: [t.tenantId, t.userId],
+      foreignColumns: [users.tenantId, users.id],
     }).onDelete('cascade'),
     tenantIsolation(t.tenantId),
   ],
