@@ -95,13 +95,19 @@ const deal = (overrides: Partial<CrmDeal> = {}): CrmDeal => ({
   ...overrides,
 });
 
+/** A pipeline as the picker gets it. */
+const summary = () => ({
+  id: 'p1',
+  name: 'Sales',
+  position: 0,
+  stages: [{ id: 's1', name: 'Lead In', position: 0 }],
+});
+
 describe('CrmService', () => {
   const run = vi.fn(
     (_tenantId: string, fn: (tx: TenantTx) => Promise<unknown>) => fn(tx),
   );
   const findPipeline = vi.fn<CrmRepository['findPipeline']>();
-  const listPipelines = vi.fn<CrmRepository['listPipelines']>();
-  const listStages = vi.fn<CrmRepository['listStages']>();
   const createPipelineIfAbsent = vi.fn<CrmRepository['createPipelineIfAbsent']>();
   const createPipeline = vi.fn<CrmRepository['createPipeline']>();
   const createStages = vi.fn<CrmRepository['createStages']>();
@@ -119,12 +125,13 @@ describe('CrmService', () => {
   const countDealsInStage = vi.fn<CrmRepository['countDealsInStage']>();
   const removeStage = vi.fn<CrmRepository['removeStage']>();
   const countPipelines = vi.fn<CrmRepository['countPipelines']>();
-  const listPipelinesFor = vi.fn<CrmRepository['listPipelinesFor']>();
+  const pipelineSummaries = vi.fn<CrmRepository['pipelineSummaries']>();
   const isPipelineMember = vi.fn<CrmRepository['isPipelineMember']>();
   const listCrmEligibleUsers = vi.fn<CrmRepository['listCrmEligibleUsers']>();
   const addPipelineUsers = vi.fn<CrmRepository['addPipelineUsers']>();
   const nextPipelinePosition = vi.fn<CrmRepository['nextPipelinePosition']>();
   const dealCardsForStage = vi.fn<CrmRepository['dealCardsForStage']>();
+  const boardColumns = vi.fn<CrmRepository['boardColumns']>();
   const updatePipeline = vi.fn<CrmRepository['updatePipeline']>();
   const removePipeline = vi.fn<CrmRepository['removePipeline']>();
   const removeDealsForPipeline = vi.fn<CrmRepository['removeDealsForPipeline']>();
@@ -143,8 +150,6 @@ describe('CrmService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findPipeline.mockResolvedValue(pipeline());
-    listPipelines.mockResolvedValue([pipeline()]);
-    listStages.mockResolvedValue([stage()]);
     createPipelineIfAbsent.mockResolvedValue(pipeline());
     createStages.mockResolvedValue([stage()]);
     findPipelineStages.mockResolvedValue([stage()]);
@@ -167,7 +172,7 @@ describe('CrmService', () => {
     placeDeals.mockResolvedValue(undefined);
     countDealsInStage.mockResolvedValue(0);
     countPipelines.mockResolvedValue(1);
-    listPipelinesFor.mockResolvedValue([pipeline()]);
+    pipelineSummaries.mockResolvedValue([summary()]);
     isPipelineMember.mockResolvedValue(true);
     listCrmEligibleUsers.mockResolvedValue([
       { id: 'u2', fullName: 'Asha', email: 'asha@acme.test' },
@@ -176,6 +181,7 @@ describe('CrmService', () => {
     addPipelineUsers.mockResolvedValue(undefined);
     nextPipelinePosition.mockResolvedValue(1);
     dealCardsForStage.mockResolvedValue([]);
+    boardColumns.mockResolvedValue({ stages: [stage()], columns: { s1: [] }, totals: { s1: 0 } });
     createPipeline.mockResolvedValue(pipeline({ id: 'p2', name: 'Partners', position: 1 }));
     findClient.mockResolvedValue(client());
     createClient.mockResolvedValue(client());
@@ -186,8 +192,6 @@ describe('CrmService', () => {
       { run } as unknown as TenantDb,
       {
         findPipeline,
-        listPipelines,
-        listStages,
         createPipelineIfAbsent,
         createPipeline,
         createStages,
@@ -205,12 +209,13 @@ describe('CrmService', () => {
         countDealsInStage,
         removeStage,
         countPipelines,
-        listPipelinesFor,
+        pipelineSummaries,
         isPipelineMember,
         listCrmEligibleUsers,
         addPipelineUsers,
         nextPipelinePosition,
         dealCardsForStage,
+        boardColumns,
         updatePipeline,
         removePipeline,
         removeDealsForPipeline,
@@ -228,6 +233,7 @@ describe('CrmService', () => {
 
   it('seeds the default Sales pipeline the first time the CRM is opened', async () => {
     countPipelines.mockResolvedValue(0);
+    pipelineSummaries.mockResolvedValueOnce([]).mockResolvedValueOnce([summary()]);
 
     const result = await service.listPipelines(actor);
 
@@ -431,15 +437,22 @@ describe('CrmService', () => {
 
   it('lists every pipeline for the owner and only memberships for everyone else', async () => {
     await service.listPipelines(actor);
-    expect(listPipelinesFor).toHaveBeenLastCalledWith(tx, null);
+    expect(pipelineSummaries).toHaveBeenLastCalledWith(tx, null);
 
     await service.listPipelines(staff);
-    expect(listPipelinesFor).toHaveBeenLastCalledWith(tx, 'u2');
+    expect(pipelineSummaries).toHaveBeenLastCalledWith(tx, 'u2');
+  });
+
+  it('lists pipelines in one query when there are some, without counting', async () => {
+    await expect(service.listPipelines(actor)).resolves.toEqual([summary()]);
+    expect(pipelineSummaries).toHaveBeenCalledTimes(1);
+    expect(countPipelines).not.toHaveBeenCalled();
+    expect(createPipelineIfAbsent).not.toHaveBeenCalled();
   });
 
   it('does not seed a second board when the person just sees no pipelines', async () => {
     countPipelines.mockResolvedValue(3);
-    listPipelinesFor.mockResolvedValue([]);
+    pipelineSummaries.mockResolvedValue([]);
 
     await expect(service.listPipelines(staff)).resolves.toEqual([]);
     expect(createPipelineIfAbsent).not.toHaveBeenCalled();
@@ -448,6 +461,21 @@ describe('CrmService', () => {
   it('never checks membership for the owner', async () => {
     await service.board(actor, 'p1', 100);
     expect(isPipelineMember).not.toHaveBeenCalled();
+  });
+
+  it('builds the board from one boardColumns query', async () => {
+    boardColumns.mockResolvedValue({
+      stages: [stage(), stage({ id: 's2', name: 'Won', position: 1 })],
+      columns: { s1: [card()], s2: [] },
+      totals: { s1: 140, s2: 0 },
+    });
+
+    const result = await service.board(actor, 'p1', 100);
+
+    expect(boardColumns).toHaveBeenCalledWith(tx, 'p1', 100);
+    expect(result.stages.map((s) => s.id)).toEqual(['s1', 's2']);
+    expect(result.totals).toEqual({ s1: 140, s2: 0 });
+    expect(result.columns.s1.map((c) => c.id)).toEqual(['d1']);
   });
 
   it('reports pipelines, stages and deals outside your access as not found', async () => {
@@ -465,6 +493,7 @@ describe('CrmService', () => {
     });
 
     await expect(service.board(staff, 'p1', 100)).rejects.toBeInstanceOf(NotFoundException);
+    expect(boardColumns).not.toHaveBeenCalled();
     await expect(service.searchDeals(staff, 'p1', 'acme', 20)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.deleteStage(staff, 's1')).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.getDeal(staff, 'd1')).rejects.toBeInstanceOf(NotFoundException);

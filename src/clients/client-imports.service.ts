@@ -61,15 +61,17 @@ export class ClientImportsService {
 
   deleteClientChunk(actor: Actor, id: string, limit: number) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      if (!(await this.imports.exists(tx, id))) throw new NotFoundException('Import not found');
-      return this.imports.deleteClientChunk(tx, id, limit);
+      const result = await this.imports.deleteClientChunk(tx, id, limit);
+      if (!result) throw new NotFoundException('Import not found');
+      return result;
     });
   }
 
   async remove(actor: Actor, id: string): Promise<number> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      if (!(await this.imports.exists(tx, id))) throw new NotFoundException('Import not found');
-      return this.imports.removeWithClients(tx, id);
+      const deleted = await this.imports.removeWithClients(tx, id);
+      if (deleted === null) throw new NotFoundException('Import not found');
+      return deleted;
     });
   }
 }

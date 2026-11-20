@@ -44,12 +44,12 @@ export class ClientsService {
     private readonly imports: ClientImportsRepository,
   ) {}
 
-  /** One page of the company's clients, with what the table footer needs. */
   /** Client ids from one import, for "Select imports" on the Clients page. */
   idsForImport(actor: Actor, importId: string): Promise<string[]> {
     return this.tenantDb.run(actor.tenant.id, (tx) => this.clients.idsForImport(tx, importId));
   }
 
+  /** One page of the company's clients, with what the table footer needs. */
   async list(actor: Actor, page: number, pageSize: number, q?: string, importId?: string) {
     const { items, total } = await this.tenantDb.run(actor.tenant.id, (tx) =>
       this.clients.page(tx, page, pageSize, q, importId),
@@ -139,27 +139,11 @@ export class ClientsService {
     return { created, skipped };
   }
 
-  /** Chunked bulk delete; import counters follow the clients that were removed. */
+  /** Bulk delete (up to 500 ids); import counters follow the clients that were removed. */
   async removeMany(actor: Actor, dto: DeleteClientsDto) {
-    return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      let deleted = 0;
-      for (let index = 0; index < dto.ids.length; index += 100) {
-        const chunk = dto.ids.slice(index, index + 100);
-        const found = await this.clients.findByIds(tx, chunk);
-        if (!found.length) continue;
-        await this.clients.removeByIds(tx, found.map((client) => client.id));
-        deleted += found.length;
-
-        const perImport = new Map<string, number>();
-        for (const client of found) {
-          if (client.importId) perImport.set(client.importId, (perImport.get(client.importId) ?? 0) + 1);
-        }
-        for (const [importId, amount] of perImport) {
-          await this.imports.decrementCreated(tx, importId, amount);
-        }
-      }
-      return { deleted };
-    });
+    return this.tenantDb.run(actor.tenant.id, async (tx) => ({
+      deleted: await this.clients.removeMany(tx, dto.ids),
+    }));
   }
 
   async remove(actor: Actor, id: string): Promise<void> {

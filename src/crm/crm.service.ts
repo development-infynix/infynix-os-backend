@@ -96,23 +96,14 @@ export class CrmService {
    */
   async listPipelines(actor: Actor): Promise<PipelineResponse[]> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      if ((await this.crm.countPipelines(tx)) === 0) {
-        await this.seedDefaultPipeline(tx, actor.tenant.id);
-      }
-      const pipelines = await this.crm.listPipelinesFor(tx, this.memberId(actor));
-      const stages = await this.crm.listStages(
-        tx,
-        pipelines.map((pipeline) => pipeline.id),
-      );
-      const stagesByPipeline = new Map<string, CrmStage[]>();
-      for (const stage of stages) {
-        const list = stagesByPipeline.get(stage.pipelineId);
-        if (list) list.push(stage);
-        else stagesByPipeline.set(stage.pipelineId, [stage]);
-      }
-      return pipelines.map((pipeline) =>
-        toPipelineResponse(pipeline, stagesByPipeline.get(pipeline.id) ?? []),
-      );
+      const userId = this.memberId(actor);
+      // One query in the usual case. Only an empty answer needs the count: the
+      // company may have none yet (seed the default board), or this person may
+      // just not be on any (don't seed a second one).
+      const pipelines = await this.crm.pipelineSummaries(tx, userId);
+      if (pipelines.length || (await this.crm.countPipelines(tx)) > 0) return pipelines;
+      await this.seedDefaultPipeline(tx, actor.tenant.id);
+      return this.crm.pipelineSummaries(tx, userId);
     });
   }
 
@@ -311,19 +302,7 @@ export class CrmService {
   async board(actor: Actor, pipelineId: string, limit: number) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const pipeline = await this.findPipelineOrFail(tx, actor, pipelineId);
-      const stages = await this.crm.findPipelineStages(tx, pipelineId);
-      const columns: Record<string, CrmDealCard[]> = {};
-      const totals: Record<string, number> = {};
-      await Promise.all(
-        stages.map(async (stage) => {
-          const [cards, total] = await Promise.all([
-            this.crm.dealCardsForStage(tx, stage.id, limit),
-            this.crm.countDealsInStage(tx, stage.id),
-          ]);
-          columns[stage.id] = cards;
-          totals[stage.id] = total;
-        }),
-      );
+      const { stages, columns, totals } = await this.crm.boardColumns(tx, pipelineId, limit);
       return {
         pipeline: toPipelineResponse(pipeline, stages),
         stages: stages.map(toStageResponse),

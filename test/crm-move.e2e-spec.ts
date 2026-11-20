@@ -122,6 +122,39 @@ describe('CRM deal moves', { timeout: 30_000 }, () => {
     expect(after.from.map((r) => r.position)).toEqual([0, 1, 2, 3]);
   });
 
+  it('loads the board in one query: order, totals, per-stage limit, empty stages', async () => {
+    await service.moveDeal(actor, deal.b, { stageId: from, position: 0 });
+
+    const two = await service.board(actor, pipelineId, 2);
+    expect(two.stages.map((s) => s.name)).toEqual(['From', 'To']);
+    expect(two.totals).toEqual({ [from]: 4, [to]: 0 });
+    expect(two.columns[from].map((c) => c.name)).toEqual(['b', 'a']);
+    expect(two.columns[to]).toEqual([]);
+    const [first] = two.columns[from];
+    expect(first.addedAt).toBeInstanceOf(Date);
+    expect(Number.isNaN(first.addedAt.getTime())).toBe(false);
+    expect(first.email).toBe(`b-${tag}@example.test`);
+    expect(first.customDetails).toEqual({});
+
+    const all = await service.board(actor, pipelineId, 100);
+    expect(all.columns[from].map((c) => c.name)).toEqual(['b', 'a', 'c', 'd']);
+  });
+
+  it('lists pipelines with their stages nested, in board order', async () => {
+    const list = await service.listPipelines(actor);
+    expect(list).toEqual([
+      {
+        id: pipelineId,
+        name: 'Sales',
+        position: 0,
+        stages: [
+          { id: from, name: 'From', position: 0 },
+          { id: to, name: 'To', position: 1 },
+        ],
+      },
+    ]);
+  });
+
   it('keeps both of two simultaneous moves into the same stage', async () => {
     // Two open connections, so the second move doesn't lag behind while one connects.
     await Promise.all([pool.query('select 1'), pool.query('select 1')]);

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, gt, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gt, ilike, or, sql, type SQL } from 'drizzle-orm';
 import type { ClientImportRow } from '../db/schema.js';
 import { clientImports, clients } from '../db/schema.js';
 import type { TenantTx } from '../db/tenant-db.js';
@@ -119,40 +119,60 @@ export class ClientImportsRepository {
       .where(eq(clientImports.id, id));
   }
 
-  /** One client-driven delete batch, with the count left for the import. */
-  async deleteClientChunk(tx: TenantTx, id: string, limit: number) {
-    const batch = await tx
-      .select({ id: clients.id })
-      .from(clients)
-      .where(eq(clients.importId, id))
-      .limit(limit);
-    if (batch.length) {
-      await tx.delete(clients).where(inArray(clients.id, batch.map((row) => row.id)));
-      // Keep the import's count right even if the client loop stops partway.
-      await this.decrementCreated(tx, id, batch.length);
-    }
-    const [remaining] = await tx
-      .select({ value: count() })
-      .from(clients)
-      .where(eq(clients.importId, id));
-    return { deleted: batch.length, remaining: remaining?.value ?? 0 };
+  /**
+   * One client-driven delete batch, in one statement: up to `limit` of the
+   * import's clients go, the import's created count drops to match (so it stays
+   * right if the client loop stops partway), and the count left comes back.
+   * Null when the import doesn't exist.
+   */
+  async deleteClientChunk(
+    tx: TenantTx,
+    id: string,
+    limit: number,
+  ): Promise<{ deleted: number; remaining: number } | null> {
+    // Every part of the statement sees the rows as they were before it, so
+    // "remaining" is the count before minus what this batch deleted.
+    const result = await tx.execute<{ deleted: number; remaining: number }>(sql`
+      with imp as (
+        select id from ${clientImports} where id = ${id}
+      ),
+      gone as (
+        delete from ${clients}
+         where id in (select id from ${clients} where import_id = (select id from imp) limit ${limit})
+        returning 1
+      ),
+      counts as (
+        update ${clientImports}
+           set created_count = greatest(0, created_count - (select count(*) from gone))
+         where id = (select id from imp)
+        returning 1
+      )
+      select (select count(*) from gone)::int as deleted,
+             ((select count(*) from ${clients} where import_id = imp.id) - (select count(*) from gone))::int as remaining
+        from imp
+    `);
+    return result.rows[0] ?? null;
   }
 
-  /** Deletes linked clients 100 at a time, then the import itself. */
-  async removeWithClients(tx: TenantTx, id: string): Promise<number> {
-    let deleted = 0;
-    while (true) {
-      const batch = await tx
-        .select({ id: clients.id })
-        .from(clients)
-        .where(eq(clients.importId, id))
-        .limit(100);
-      if (!batch.length) break;
-      await tx.delete(clients).where(inArray(clients.id, batch.map((row) => row.id)));
-      deleted += batch.length;
-    }
-    await tx.delete(clientImports).where(eq(clientImports.id, id));
-    return deleted;
+  /**
+   * Deletes the import and any clients still linked to it, in one statement
+   * (the page clears big imports in chunks first, so few are usually left).
+   * Null when the import doesn't exist; otherwise how many clients went.
+   */
+  async removeWithClients(tx: TenantTx, id: string): Promise<number | null> {
+    // The clients -> import foreign key acts at the end of the statement, by
+    // which time the linked clients are already gone.
+    const result = await tx.execute<{ deleted: number }>(sql`
+      with gone as (
+        delete from ${clients} where import_id = ${id} returning 1
+      ),
+      imp as (
+        delete from ${clientImports} where id = ${id} returning 1
+      )
+      select (select count(*) from gone)::int as deleted
+       where exists (select 1 from imp)
+    `);
+    return result.rows[0]?.deleted ?? null;
   }
 
   /**

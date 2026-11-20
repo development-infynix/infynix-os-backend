@@ -62,6 +62,14 @@ export interface CrmEligibleUser {
   email: string;
 }
 
+/** What the pipeline picker needs: each pipeline with its stages in board order. */
+export interface CrmPipelineSummary {
+  id: string;
+  name: string;
+  position: number;
+  stages: { id: string; name: string; position: number }[];
+}
+
 /** A deal plus the client fields a kanban card shows. */
 export interface CrmDealCard {
   id: string;
@@ -125,27 +133,37 @@ const dealCardColumns = {
 export class CrmRepository {
   /* ── Pipelines ────────────────────────────────────────────────────────── */
 
-  listPipelines(tx: TenantTx): Promise<CrmPipeline[]> {
-    return tx
-      .select(pipelineColumns)
-      .from(crmPipelines)
-      .orderBy(asc(crmPipelines.position), asc(crmPipelines.id));
-  }
-
   /** The pipelines this person may see: all of them for `null` (owners), else their memberships. */
-  listPipelinesFor(tx: TenantTx, userId: string | null): Promise<CrmPipeline[]> {
-    if (userId === null) return this.listPipelines(tx);
-    return tx
-      .select(pipelineColumns)
-      .from(crmPipelines)
-      .innerJoin(
-        crmPipelineUsers,
-        and(
-          eq(crmPipelineUsers.pipelineId, crmPipelines.id),
-          eq(crmPipelineUsers.userId, userId),
-        ),
-      )
-      .orderBy(asc(crmPipelines.position), asc(crmPipelines.id));
+  /**
+   * The pipelines this person can see (all of them when `userId` is null, i.e.
+   * the owner), each with its stages nested, in one round trip.
+   */
+  async pipelineSummaries(
+    tx: TenantTx,
+    userId: string | null,
+  ): Promise<CrmPipelineSummary[]> {
+    const visible =
+      userId === null
+        ? sql`true`
+        : sql`exists (
+            select 1 from ${crmPipelineUsers} u
+            where u.pipeline_id = p.id and u.user_id = ${userId}
+          )`;
+    const result = await tx.execute<CrmPipelineSummary>(sql`
+      select p.id, p.name, p.position,
+             coalesce(
+               (select json_agg(
+                         json_build_object('id', s.id, 'name', s.name, 'position', s.position)
+                         order by s.position, s.id)
+                  from ${crmPipelineStages} s
+                 where s.pipeline_id = p.id),
+               '[]'::json
+             ) as stages
+      from ${crmPipelines} p
+      where ${visible}
+      order by p.position asc, p.id asc
+    `);
+    return result.rows;
   }
 
   async isPipelineMember(
@@ -262,19 +280,6 @@ export class CrmRepository {
   }
 
   /* ── Stages ───────────────────────────────────────────────────────────── */
-
-  listStages(tx: TenantTx, pipelineIds: string[]): Promise<CrmStage[]> {
-    if (!pipelineIds.length) return Promise.resolve([]);
-    return tx
-      .select(stageColumns)
-      .from(crmPipelineStages)
-      .where(inArray(crmPipelineStages.pipelineId, pipelineIds))
-      .orderBy(
-        asc(crmPipelineStages.pipelineId),
-        asc(crmPipelineStages.position),
-        asc(crmPipelineStages.id),
-      );
-  }
 
   async findStage(tx: TenantTx, id: string): Promise<CrmStage | null> {
     const [row] = await tx
@@ -526,6 +531,101 @@ export class CrmRepository {
       .from(crmDeals)
       .where(eq(crmDeals.pipelineId, pipelineId))
       .then(([{ total }]) => total);
+  }
+
+  /**
+   * The whole board in one round trip: every stage of the pipeline in order,
+   * each with its first `limit` cards (board order) and its true total. One
+   * query instead of two per stage matters because they can't overlap: they
+   * share the transaction's connection, so each one waits for the last.
+   */
+  async boardColumns(
+    tx: TenantTx,
+    pipelineId: string,
+    limit: number,
+  ): Promise<{
+    stages: CrmStage[];
+    columns: Record<string, CrmDealCard[]>;
+    totals: Record<string, number>;
+  }> {
+    // Timestamps go out as ISO text: raw queries get Postgres's own format back, not Dates.
+    const iso = (column: SQL) => sql`(to_json(${column}) #>> '{}')`;
+    const result = await tx.execute<{
+      stage_id: string;
+      stage_tenant_id: string;
+      stage_name: string;
+      stage_position: number;
+      stage_created_at: string;
+      stage_updated_at: string;
+      total: number;
+      id: string | null;
+      client_id: string;
+      position: number;
+      name: string;
+      email: string | null;
+      phone: string | null;
+      custom_details: Record<string, unknown> | string | null;
+      added_at: string;
+    }>(sql`
+      select s.id as stage_id, s.tenant_id as stage_tenant_id, s.name as stage_name,
+             s.position as stage_position,
+             ${iso(sql`s.created_at`)} as stage_created_at,
+             ${iso(sql`s.updated_at`)} as stage_updated_at,
+             t.total,
+             c.id, c.client_id, c.position, c.name, c.email, c.phone, c.custom_details,
+             ${iso(sql`c.created_at`)} as added_at
+      from ${crmPipelineStages} s
+      cross join lateral (
+        select count(*)::int as total from ${crmDeals} d where d.stage_id = s.id
+      ) t
+      left join lateral (
+        select d.id, d.client_id, d.position, d.created_at,
+               cl.name, cl.email, cl.phone, cl.custom_details
+        from ${crmDeals} d
+        join ${clients} cl on cl.id = d.client_id and cl.tenant_id = d.tenant_id
+        where d.stage_id = s.id
+        order by d.position asc, d.created_at desc, d.id desc
+        limit ${limit}
+      ) c on true
+      where s.pipeline_id = ${pipelineId}
+      order by s.position asc, s.id asc, c.position asc, c.created_at desc, c.id desc
+    `);
+
+    const stages: CrmStage[] = [];
+    const columns: Record<string, CrmDealCard[]> = {};
+    const totals: Record<string, number> = {};
+    for (const row of result.rows) {
+      if (!(row.stage_id in columns)) {
+        stages.push({
+          id: row.stage_id,
+          tenantId: row.stage_tenant_id,
+          pipelineId,
+          name: row.stage_name,
+          position: row.stage_position,
+          createdAt: new Date(row.stage_created_at),
+          updatedAt: new Date(row.stage_updated_at),
+        });
+        columns[row.stage_id] = [];
+        totals[row.stage_id] = row.total;
+      }
+      if (row.id === null) continue; // a stage with no deals still gets one row
+      columns[row.stage_id].push({
+        id: row.id,
+        pipelineId,
+        stageId: row.stage_id,
+        clientId: row.client_id,
+        position: row.position,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        customDetails:
+          typeof row.custom_details === 'string'
+            ? (JSON.parse(row.custom_details) as Record<string, unknown>)
+            : (row.custom_details ?? {}),
+        addedAt: new Date(row.added_at),
+      });
+    }
+    return { stages, columns, totals };
   }
 
   /** Newest-first page of one stage; `position` breaks ties for drag order. */

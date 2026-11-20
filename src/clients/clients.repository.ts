@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, ilike, inArray, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
-import { clients } from '../db/schema.js';
+import { clientImports, clients } from '../db/schema.js';
 
 /** A customer of the company the transaction is scoped to. */
 export interface Client {
@@ -75,17 +75,24 @@ export class ClientsRepository {
     if (importId) conditions.push(eq(clients.importId, importId));
     const where = and(...conditions);
 
-    const [items, [{ total }]] = await Promise.all([
-      tx
-        .select(clientColumns)
-        .from(clients)
-        .where(where)
-        .orderBy(desc(clients.updatedAt), desc(clients.createdAt), desc(clients.id))
-        .limit(pageSize)
-        .offset((page - 1) * pageSize),
-      tx.select({ total: count() }).from(clients).where(where),
-    ]);
-    return { items, total };
+    // The total rides along on every row (a window count runs before LIMIT), so
+    // the page and its total are one round trip instead of two.
+    const rows = await tx
+      .select({ ...clientColumns, total: sql<number>`count(*) over ()`.mapWith(Number) })
+      .from(clients)
+      .where(where)
+      .orderBy(desc(clients.updatedAt), desc(clients.createdAt), desc(clients.id))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+    if (rows.length) {
+      const total = rows[0].total;
+      return { items: rows.map(({ total: _total, ...client }) => client), total };
+    }
+    // An empty page carries no total. Page 1 empty means none match; past the
+    // end (e.g. after a delete) still needs the count for the footer.
+    if (page === 1) return { items: [], total: 0 };
+    const [{ total }] = await tx.select({ total: count() }).from(clients).where(where);
+    return { items: [], total };
   }
 
   async find(tx: TenantTx, id: string): Promise<Client | null> {
@@ -111,9 +118,34 @@ export class ClientsRepository {
     return tx.select(clientColumns).from(clients).where(inArray(clients.id, ids));
   }
 
-  async removeByIds(tx: TenantTx, ids: string[]): Promise<void> {
-    if (!ids.length) return;
-    await tx.delete(clients).where(inArray(clients.id, ids));
+  /**
+   * Deletes these clients and lowers each affected import's created count, in
+   * one statement. Ids that don't exist (or belong to another company: RLS
+   * hides them) are skipped. Returns how many were deleted.
+   */
+  async removeMany(tx: TenantTx, ids: string[]): Promise<number> {
+    if (!ids.length) return 0;
+    const list = sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const result = await tx.execute<{ deleted: number }>(sql`
+      with gone as (
+        delete from ${clients} where id = any(array[${list}]::uuid[]) returning import_id
+      ),
+      per_import as (
+        select import_id, count(*)::int as n from gone where import_id is not null group by import_id
+      ),
+      counts as (
+        update ${clientImports} ci
+           set created_count = greatest(0, ci.created_count - per_import.n)
+          from per_import
+         where ci.id = per_import.import_id
+        returning ci.id
+      )
+      select (select count(*) from gone)::int as deleted
+    `);
+    return result.rows[0]?.deleted ?? 0;
   }
 
   async create(tx: TenantTx, data: CreateClientData): Promise<Client> {

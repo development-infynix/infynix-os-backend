@@ -26,8 +26,10 @@ export class TenantDb {
 
   run<T>(tenantId: string, fn: (tx: TenantTx) => Promise<T>): Promise<T> {
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
-      await tx.execute(sql`set local role infynix_tenant`);
+      // One statement, one round trip: set_config('role', ..., true) is SET LOCAL ROLE.
+      await tx.execute(
+        sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('role', 'infynix_tenant', true)`,
+      );
       return fn(tx);
     });
   }
