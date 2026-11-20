@@ -16,6 +16,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type PgTableExtraConfigValue,
 } from 'drizzle-orm/pg-core';
 
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
@@ -298,6 +299,15 @@ export const clients = pgTable.withRLS(
 /* ── CRM ─────────────────────────────────────────────────────────────────── */
 
 /**
+ * How a pipeline picks the owner of new deals, and how a deal's current owner
+ * was assigned (see docs/user-deals-assignment.md). `manual` as a source means
+ * a person picked the owner in the deal drawer.
+ */
+export const CRM_ASSIGNMENT_RULES = ['creator', 'manual', 'round_robin', 'single_user'] as const;
+export type CrmAssignmentRule = (typeof CRM_ASSIGNMENT_RULES)[number];
+const assignmentValues = sql.raw(CRM_ASSIGNMENT_RULES.map((rule) => `'${rule}'`).join(', '));
+
+/**
  * A pipeline owns an ordered list of stages and the deals inside it. Every
  * company has at least one; `list()` creates a default "Sales" pipeline the
  * first time the CRM is opened.
@@ -312,14 +322,32 @@ export const crmPipelines = pgTable.withRLS(
     name: text().notNull(),
     /** Order in the pipeline picker; lower first. */
     position: integer().notNull().default(0),
+    /** Who owns deals added from now on. */
+    assignmentRule: text('assignment_rule').$type<CrmAssignmentRule>().notNull().default('creator'),
+    /** The `single_user` rule's person; must be on this pipeline's access list. */
+    singleUserId: uuid('single_user_id'),
+    /** Where round robin carries on: shared by the rule and the Share tool. */
+    roundRobinCursor: integer('round_robin_cursor').notNull().default(0),
+    /** Who created it (null for the seeded default and pipelines made before this was recorded). */
+    createdBy: uuid('created_by').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
     createdAt: timestamptz('created_at').notNull().defaultNow(),
     updatedAt: timestamptz('updated_at')
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [
+  // Annotated: pipelines and their access list reference each other.
+  (t): PgTableExtraConfigValue[] => [
     index('crm_pipelines_tenant_id_idx').on(t.tenantId),
+    check('crm_pipelines_assignment_rule', sql`${t.assignmentRule} in (${assignmentValues})`),
+    check('crm_pipelines_round_robin_cursor_nonnegative', sql`${t.roundRobinCursor} >= 0`),
+    // The single-user target must be on the access list. The migration writes
+    // ON DELETE SET NULL ("single_user_id"): only that column, not tenant/pipeline.
+    foreignKey({
+      name: 'crm_pipelines_single_user_fk',
+      columns: [t.tenantId, t.id, t.singleUserId],
+      foreignColumns: [crmPipelineUsers.tenantId, crmPipelineUsers.pipelineId, crmPipelineUsers.userId],
+    }).onDelete('set null'),
     index('crm_pipelines_position_idx').on(t.position),
     // Target for tenant-safe foreign keys from stages and deals.
     uniqueIndex('crm_pipelines_tenant_id_id_key').on(t.tenantId, t.id),
@@ -395,6 +423,10 @@ export const crmDeals = pgTable.withRLS(
     clientId: uuid('client_id').notNull(),
     /** Order inside the stage; lower first. */
     position: integer().notNull().default(0),
+    /** The deal's owner; null = unassigned. Must be on this pipeline's access list. */
+    ownerId: uuid('owner_id'),
+    /** How the current owner was assigned; meaningful only while `owner_id` is set. */
+    assignmentSource: text('assignment_source').$type<CrmAssignmentRule>(),
     createdBy: uuid('created_by').references((): AnyPgColumn => users.id, {
       onDelete: 'set null',
     }),
@@ -433,6 +465,22 @@ export const crmDeals = pgTable.withRLS(
       foreignColumns: [clients.tenantId, clients.id],
     }).onDelete('cascade'),
     check('crm_deals_position_nonnegative', sql`${t.position} >= 0`),
+    check(
+      'crm_deals_assignment_source',
+      sql`${t.assignmentSource} is null or ${t.assignmentSource} in (${assignmentValues})`,
+    ),
+    // An owner must be on this pipeline's access list. The migration writes
+    // ON DELETE SET NULL ("owner_id"): losing access unassigns, never fails.
+    foreignKey({
+      name: 'crm_deals_owner_fk',
+      columns: [t.tenantId, t.pipelineId, t.ownerId],
+      foreignColumns: [crmPipelineUsers.tenantId, crmPipelineUsers.pipelineId, crmPipelineUsers.userId],
+    }).onDelete('set null'),
+    index('crm_deals_pipeline_owner_idx').on(t.pipelineId, t.ownerId),
+    // "Oldest unassigned first" for Share and Give.
+    index('crm_deals_pipeline_unassigned_idx')
+      .on(t.pipelineId, t.createdAt, t.id)
+      .where(sql`${t.ownerId} is null`),
     tenantIsolation(t.tenantId),
   ],
 );
@@ -455,8 +503,12 @@ export const crmPipelineUsers = pgTable.withRLS(
     }),
     createdAt: timestamptz('created_at').notNull().defaultNow(),
   },
-  (t) => [
+  // Annotated: pipelines and their access list reference each other.
+  (t): PgTableExtraConfigValue[] => [
     primaryKey({ name: 'crm_pipeline_users_pkey', columns: [t.pipelineId, t.userId] }),
+    // Target for tenant-safe foreign keys: a deal's owner and a pipeline's
+    // single-user target must be on that pipeline's access list.
+    uniqueIndex('crm_pipeline_users_tenant_pipeline_user_key').on(t.tenantId, t.pipelineId, t.userId),
     index('crm_pipeline_users_user_idx').on(t.userId),
     foreignKey({
       name: 'crm_pipeline_users_pipeline_fk',

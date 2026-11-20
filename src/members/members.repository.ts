@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, count, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
-import { users } from '../db/schema.js';
+import { crmPipelines, users } from '../db/schema.js';
 import type { MemberRole } from '../tenancy/tenancy.types.js';
 
 /** A person in the company, as owners and managers see them. */
@@ -103,6 +103,13 @@ export class MembersRepository {
   }
 
   async remove(tx: TenantTx, id: string): Promise<void> {
+    // A pipeline whose single-user target is leaving switches to manual
+    // (docs/user-deals-assignment.md, D5). Their deals are unassigned by the
+    // access-list foreign key when the user (and so their list rows) goes.
+    await tx
+      .update(crmPipelines)
+      .set({ assignmentRule: 'manual', singleUserId: null })
+      .where(eq(crmPipelines.singleUserId, id));
     await tx.delete(users).where(eq(users.id, id));
   }
 

@@ -128,10 +128,15 @@ export class CrmService {
           tenantId: actor.tenant.id,
           name: dto.name,
           position,
+          createdBy: actor.user.id,
         });
+        // Whoever creates a pipeline is on it (so they can see it and own its deals),
+        // except the Owner, who sees every pipeline and never owns deals.
+        const members =
+          actor.user.role === 'owner' ? userIds : [...new Set([...userIds, actor.user.id])];
         await this.crm.addPipelineUsers(
           tx,
-          userIds.map((userId) => ({
+          members.map((userId) => ({
             tenantId: actor.tenant.id,
             pipelineId: pipeline.id,
             userId,
@@ -374,16 +379,16 @@ export class CrmService {
           );
         }
 
-        const position = await this.crm.nextDealPosition(tx, stage.id);
-        const deal = await this.crm.createDeal(tx, {
+        // The same statement as the bulk add, so the pipeline's rule picks the owner here too.
+        const added = await this.crm.addExistingClients(tx, {
           tenantId: actor.tenant.id,
           pipelineId: pipeline.id,
           stageId: stage.id,
-          clientId: client.id,
-          position,
+          clientIds: [client.id],
           createdBy: actor.user.id,
         });
-        const card = await this.crm.dealCard(tx, deal.id);
+        if (!added.added) throw new ConflictException(CLIENT_ALREADY_IN_PIPELINE);
+        const card = await this.crm.dealCardForClient(tx, pipeline.id, client.id);
         if (!card) throw new ConflictException('Unable to create the deal');
         return { ...card, existingClient };
       });

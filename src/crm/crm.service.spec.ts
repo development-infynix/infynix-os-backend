@@ -79,6 +79,9 @@ const card = (overrides: Partial<CrmDealCard> = {}): CrmDealCard => ({
   phone: null,
   customDetails: {},
   addedAt: new Date(),
+  ownerId: null,
+  ownerName: null,
+  assignmentSource: null,
   ...overrides,
 });
 
@@ -115,13 +118,13 @@ describe('CrmService', () => {
   const findStage = vi.fn<CrmRepository['findStage']>();
   const findDeal = vi.fn<CrmRepository['findDeal']>();
   const findDealByClient = vi.fn<CrmRepository['findDealByClient']>();
-  const nextDealPosition = vi.fn<CrmRepository['nextDealPosition']>();
-  const createDeal = vi.fn<CrmRepository['createDeal']>();
   const lockPipeline = vi.fn<CrmRepository['lockPipeline']>();
   const placeDeals = vi.fn<CrmRepository['placeDeals']>();
   const dealIdsInStage = vi.fn<CrmRepository['dealIdsInStage']>();
   const removeDeal = vi.fn<CrmRepository['removeDeal']>();
   const dealCard = vi.fn<CrmRepository['dealCard']>();
+  /** The card read after a form add: the tests set it through `dealCard`. */
+  const dealCardForClient = vi.fn<CrmRepository['dealCardForClient']>((_tx, _p, _c) => dealCard(tx, 'by-client'));
   const countDealsInStage = vi.fn<CrmRepository['countDealsInStage']>();
   const removeStage = vi.fn<CrmRepository['removeStage']>();
   const countPipelines = vi.fn<CrmRepository['countPipelines']>();
@@ -157,18 +160,6 @@ describe('CrmService', () => {
     findPipelineStages.mockResolvedValue([stage()]);
     findStage.mockResolvedValue(stage());
     findDealByClient.mockResolvedValue(null);
-    nextDealPosition.mockResolvedValue(0);
-    createDeal.mockResolvedValue({
-      id: 'd1',
-      tenantId: 't1',
-      pipelineId: 'p1',
-      stageId: 's1',
-      clientId: 'c1',
-      position: 0,
-      createdBy: 'u1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
     dealCard.mockResolvedValue(card());
     lockPipeline.mockResolvedValue(true);
     placeDeals.mockResolvedValue(undefined);
@@ -206,13 +197,12 @@ describe('CrmService', () => {
         findStage,
         findDeal,
         findDealByClient,
-        nextDealPosition,
-        createDeal,
         lockPipeline,
         placeDeals,
         dealIdsInStage,
         removeDeal,
         dealCard,
+        dealCardForClient,
         countDealsInStage,
         removeStage,
         countPipelines,
@@ -291,16 +281,13 @@ describe('CrmService', () => {
         customDetails: {},
       }),
     );
-    expect(createDeal).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        tenantId: 't1',
-        pipelineId: 'p1',
-        stageId: 's1',
-        clientId: 'c1',
-        createdBy: 'u1',
-      }),
-    );
+    expect(addExistingClients).toHaveBeenCalledWith(tx, {
+      tenantId: 't1',
+      pipelineId: 'p1',
+      stageId: 's1',
+      clientIds: ['c1'],
+      createdBy: 'u1',
+    });
     expect(result).toEqual({ ...expected, existingClient: false });
   });
 
@@ -313,7 +300,7 @@ describe('CrmService', () => {
 
     expect(findDuplicate).toHaveBeenCalledWith(tx, 't1', { email: null, phone: '+91 80035 09196' });
     expect(createClient).not.toHaveBeenCalled();
-    expect(createDeal).toHaveBeenCalledWith(tx, expect.objectContaining({ clientId: 'c7' }));
+    expect(addExistingClients).toHaveBeenCalledWith(tx, expect.objectContaining({ clientIds: ['c7'] }));
     expect(result.existingClient).toBe(true);
   });
 
@@ -325,7 +312,7 @@ describe('CrmService', () => {
     await expect(
       service.createDeal(actor, { pipelineId: 'p1', name: 'Vishnu', email: 'vishnu@x.com' }),
     ).rejects.toThrow('Vishnu Nair is already a client, and already in this pipeline');
-    expect(createDeal).not.toHaveBeenCalled();
+    expect(addExistingClients).not.toHaveBeenCalled();
   });
 
   it('attaches an existing client in the selected stage', async () => {
@@ -339,9 +326,9 @@ describe('CrmService', () => {
     await service.createDeal(actor, { pipelineId: 'p1', stageId: 's2', clientId: 'c1' });
 
     expect(createClient).not.toHaveBeenCalled();
-    expect(createDeal).toHaveBeenCalledWith(
+    expect(addExistingClients).toHaveBeenCalledWith(
       tx,
-      expect.objectContaining({ stageId: 's2', clientId: 'c1' }),
+      expect.objectContaining({ stageId: 's2', clientIds: ['c1'] }),
     );
   });
 
@@ -361,7 +348,7 @@ describe('CrmService', () => {
     await expect(
       service.createDeal(actor, { pipelineId: 'p1', clientId: 'c1' }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(createDeal).not.toHaveBeenCalled();
+    expect(addExistingClients).not.toHaveBeenCalled();
   });
 
   it('requires a contact method when creating a client from the form', async () => {
@@ -560,7 +547,7 @@ describe('CrmService', () => {
     expect(lockPipeline).not.toHaveBeenCalled();
     expect(placeDeals).not.toHaveBeenCalled();
     expect(removeDeal).not.toHaveBeenCalled();
-    expect(createDeal).not.toHaveBeenCalled();
+    expect(addExistingClients).not.toHaveBeenCalled();
   });
 
   it('keeps managers off pipelines they are not on: shaping routes answer not found too', async () => {

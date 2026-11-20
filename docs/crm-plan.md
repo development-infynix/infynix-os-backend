@@ -88,6 +88,8 @@ Replace the current `CrmEmpty` page. Keep the reference's structure: pipeline se
 
 ### Phase 2: Assignment
 
+_Built 20 Nov 2026: see [user-deals-assignment.md](user-deals-assignment.md) for the rules, tools, access list and owner on deals. The history panel is still to come._
+
 - The four assignment rules, with the round-robin cursor locked during creation.
 - Assign one deal; bulk distribute and unassign in chunks of 500, each chunk one statement (see [performance.md](performance.md)).
 - `crm_pipeline_activity` table and history panel.

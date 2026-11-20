@@ -13,6 +13,7 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
+import { eligibleOwners } from './crm-assignment.repository.js';
 import {
   accessItems,
   clients,
@@ -22,6 +23,7 @@ import {
   crmPipelines,
   userAccess,
   users,
+  type CrmAssignmentRule,
 } from '../db/schema.js';
 
 export interface CrmPipeline {
@@ -82,6 +84,11 @@ export interface CrmDealCard {
   phone: string | null;
   customDetails: Record<string, unknown>;
   addedAt: Date;
+  /** The deal's owner, or null when unassigned. */
+  ownerId: string | null;
+  ownerName: string | null;
+  /** How the owner was assigned (rule, tool or a manual pick); null when unassigned. */
+  assignmentSource: CrmAssignmentRule | null;
 }
 
 const pipelineColumns = {
@@ -126,6 +133,9 @@ const dealCardColumns = {
   phone: clients.phone,
   customDetails: clients.customDetails,
   addedAt: crmDeals.createdAt,
+  ownerId: crmDeals.ownerId,
+  ownerName: users.fullName,
+  assignmentSource: crmDeals.assignmentSource,
 };
 
 /** No query filters by tenant: RLS in TenantDb does that. */
@@ -236,7 +246,7 @@ export class CrmRepository {
 
   createPipeline(
     tx: TenantTx,
-    data: { tenantId: string; name: string; position: number },
+    data: { tenantId: string; name: string; position: number; createdBy?: string | null },
   ): Promise<CrmPipeline> {
     return tx
       .insert(crmPipelines)
@@ -402,31 +412,6 @@ export class CrmRepository {
     return row ?? null;
   }
 
-  async nextDealPosition(tx: TenantTx, stageId: string): Promise<number> {
-    const [{ next }] = await tx
-      .select({
-        next: sql<number>`coalesce(max(${crmDeals.position}) + 1, 0)::int`,
-      })
-      .from(crmDeals)
-      .where(eq(crmDeals.stageId, stageId));
-    return next;
-  }
-
-  async createDeal(
-    tx: TenantTx,
-    data: {
-      tenantId: string;
-      pipelineId: string;
-      stageId: string;
-      clientId: string;
-      position: number;
-      createdBy: string;
-    },
-  ): Promise<CrmDeal> {
-    const [row] = await tx.insert(crmDeals).values(data).returning(dealColumns);
-    return row;
-  }
-
   /** A stage's deal ids in board order, for re-indexing after a move. */
   async dealIdsInStage(tx: TenantTx, stageId: string): Promise<string[]> {
     const rows = await tx
@@ -490,14 +475,50 @@ export class CrmRepository {
       start as (
         select coalesce(max(d.position) + 1, 0) as p from ${crmDeals} d where d.stage_id = (select id from st)
       ),
-      ins as (
-        insert into ${crmDeals} (tenant_id, pipeline_id, stage_id, client_id, position, created_by)
-        select ${data.tenantId}, ${data.pipelineId}, st.id, f.id,
-               (select p from start) + row_number() over (order by f.ord) - 1,
-               ${data.createdBy}
-          from found f cross join st
+      -- The pipeline's rule picks each new deal's owner (docs/user-deals-assignment.md).
+      -- The row lock queues concurrent adds so round robin never hands out the same turn twice.
+      pipe as (
+        select assignment_rule as rule, single_user_id as single, round_robin_cursor as cursor
+          from ${crmPipelines} where id = ${data.pipelineId}
+         for no key update
+      ),
+      elig as (
+        select coalesce(array_agg(e.user_id order by e.user_id), '{}'::uuid[]) as ids
+          from (${eligibleOwners(sql`${data.pipelineId}`)}) e
+      ),
+      todo as (
+        select f.id, f.ord, (row_number() over (order by f.ord) - 1)::int as i
+          from found f
          where f.id not in (select client_id from existing)
+      ),
+      owned as (
+        select t.id, t.i,
+               case (select rule from pipe)
+                 when 'creator' then case when ${data.createdBy}::uuid = any(e.ids) then ${data.createdBy}::uuid end
+                 when 'single_user' then case when (select single from pipe) = any(e.ids) then (select single from pipe) end
+                 when 'round_robin' then case when cardinality(e.ids) > 0
+                   then e.ids[(((select cursor from pipe) + t.i) % cardinality(e.ids)) + 1] end
+               end as owner
+          from todo t cross join elig e
+      ),
+      ins as (
+        insert into ${crmDeals} (tenant_id, pipeline_id, stage_id, client_id, position, created_by, owner_id, assignment_source)
+        select ${data.tenantId}, ${data.pipelineId}, st.id, o.id,
+               (select p from start) + o.i,
+               ${data.createdBy},
+               o.owner,
+               case when o.owner is not null then (select rule from pipe) end
+          from owned o cross join st
         on conflict do nothing
+        returning 1
+      ),
+      cursor_moved as (
+        update ${crmPipelines}
+           set round_robin_cursor = ((select cursor from pipe) + (select count(*) from todo)) % cardinality((select ids from elig))
+         where id = ${data.pipelineId}
+           and (select rule from pipe) = 'round_robin'
+           and cardinality((select ids from elig)) > 0
+           and exists (select 1 from st)
         returning 1
       )
       select (select count(*) from st)::int as stage_found,
@@ -647,6 +668,9 @@ export class CrmRepository {
       phone: string | null;
       custom_details: Record<string, unknown> | string | null;
       added_at: string;
+      owner_id: string | null;
+      owner_name: string | null;
+      assignment_source: CrmAssignmentRule | null;
     }>(sql`
       select s.id as stage_id, s.tenant_id as stage_tenant_id, s.name as stage_name,
              s.position as stage_position,
@@ -654,6 +678,7 @@ export class CrmRepository {
              ${iso(sql`s.updated_at`)} as stage_updated_at,
              t.total,
              c.id, c.client_id, c.position, c.name, c.email, c.phone, c.custom_details,
+             c.owner_id, c.owner_name, c.assignment_source,
              ${iso(sql`c.created_at`)} as added_at
       from ${crmPipelineStages} s
       cross join lateral (
@@ -661,9 +686,11 @@ export class CrmRepository {
       ) t
       left join lateral (
         select d.id, d.client_id, d.position, d.created_at,
-               cl.name, cl.email, cl.phone, cl.custom_details
+               cl.name, cl.email, cl.phone, cl.custom_details,
+               d.owner_id, ow.full_name as owner_name, d.assignment_source
         from ${crmDeals} d
         join ${clients} cl on cl.id = d.client_id and cl.tenant_id = d.tenant_id
+        left join ${users} ow on ow.id = d.owner_id
         where d.stage_id = s.id
         order by d.position asc, d.created_at desc, d.id desc
         limit ${limit}
@@ -704,6 +731,9 @@ export class CrmRepository {
             ? (JSON.parse(row.custom_details) as Record<string, unknown>)
             : (row.custom_details ?? {}),
         addedAt: new Date(row.added_at),
+        ownerId: row.owner_id,
+        ownerName: row.owner_name,
+        assignmentSource: row.assignment_source,
       });
     }
     return { stages, columns, totals };
@@ -723,6 +753,7 @@ export class CrmRepository {
         clients,
         and(eq(clients.id, crmDeals.clientId), eq(clients.tenantId, crmDeals.tenantId)),
       )
+      .leftJoin(users, eq(users.id, crmDeals.ownerId))
       .where(eq(crmDeals.stageId, stageId))
       .orderBy(
         asc(crmDeals.position),
@@ -733,6 +764,20 @@ export class CrmRepository {
       .offset(offset);
   }
 
+  /** The card of `clientId`'s deal in `pipelineId` (a client has at most one per pipeline). */
+  async dealCardForClient(tx: TenantTx, pipelineId: string, clientId: string): Promise<CrmDealCard | null> {
+    const [row] = await tx
+      .select(dealCardColumns)
+      .from(crmDeals)
+      .innerJoin(
+        clients,
+        and(eq(clients.id, crmDeals.clientId), eq(clients.tenantId, crmDeals.tenantId)),
+      )
+      .leftJoin(users, eq(users.id, crmDeals.ownerId))
+      .where(and(eq(crmDeals.pipelineId, pipelineId), eq(crmDeals.clientId, clientId)));
+    return row ?? null;
+  }
+
   async dealCard(tx: TenantTx, id: string): Promise<CrmDealCard | null> {
     const [row] = await tx
       .select(dealCardColumns)
@@ -741,6 +786,7 @@ export class CrmRepository {
         clients,
         and(eq(clients.id, crmDeals.clientId), eq(clients.tenantId, crmDeals.tenantId)),
       )
+      .leftJoin(users, eq(users.id, crmDeals.ownerId))
       .where(eq(crmDeals.id, id));
     return row ?? null;
   }
@@ -769,6 +815,7 @@ export class CrmRepository {
         clients,
         and(eq(clients.id, crmDeals.clientId), eq(clients.tenantId, crmDeals.tenantId)),
       )
+      .leftJoin(users, eq(users.id, crmDeals.ownerId))
       .where(and(eq(crmDeals.pipelineId, pipelineId), search))
       .orderBy(desc(crmDeals.createdAt), desc(crmDeals.id))
       .limit(limit);
