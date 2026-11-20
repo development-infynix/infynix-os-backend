@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Performance: database round trips
+
+Request speed here is set by how many queries run one after another (about 165 ms each from a dev machine to Neon), not by query cost. Keep a request to about 4 round trips: no queries in loops, page and total in one query, writes and their follow-up updates in one statement, and no frontend request waterfalls. Rules, examples and the raw-SQL caveats are in [docs/performance.md](docs/performance.md).
+
 ## NestJS
 
 This app's version of NestJS is likely newer than what you know. https://docs.nestjs.com/llms.txt indexes its documentation, with a markdown page per chapter.
