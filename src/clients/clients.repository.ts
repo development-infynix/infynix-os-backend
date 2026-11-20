@@ -32,6 +32,37 @@ export interface UpdateClientData {
   customDetails?: Record<string, unknown>;
 }
 
+/**
+ * The keys two clients are compared on, matching the database's unique
+ * indexes exactly: email ignoring case and surrounding spaces, phone as digits
+ * only. Anything that looks a client up by contact must use these.
+ */
+const emailKey = (column: SQL) => sql`lower(btrim(${column}))`;
+// Written '\\D' so Postgres receives '\D' (non-digit): a template literal drops a lone backslash.
+const phoneKey = (column: SQL) => sql`regexp_replace(${column}, '\\D', '', 'g')`;
+
+/** The same keys in code, for spotting duplicates inside one batch. */
+export const contactKeys = (email: string | null, phone: string | null) => ({
+  email: email ? email.trim().toLowerCase() : null,
+  phone: phone && phone.replace(/\D/g, '') ? phone.replace(/\D/g, '') : null,
+});
+
+/** An existing client that already has this email or phone. */
+export interface DuplicateClient {
+  id: string;
+  name: string;
+  /** Which contact matched: the message names it. */
+  matchedOn: 'email' | 'phone';
+}
+
+/** One spreadsheet row that passed validation, in file order. */
+export interface ImportRowData {
+  name: string;
+  email: string | null;
+  phone: string | null;
+  customDetails: Record<string, unknown>;
+}
+
 const clientColumns = {
   id: clients.id,
   tenantId: clients.tenantId,
@@ -154,10 +185,126 @@ export class ClientsRepository {
   }
 
   /** One multi-row INSERT for an import chunk; returns how many were written. */
-  async createMany(tx: TenantTx, data: CreateClientData[]): Promise<number> {
-    if (!data.length) return 0;
-    await tx.insert(clients).values(data);
-    return data.length;
+  /**
+   * The client (other than `excludeId`) that already has this email or phone,
+   * if any; an email match wins over a phone match. The explicit tenant filter
+   * lets Postgres use the (tenant, contact) unique indexes.
+   */
+  async findDuplicate(
+    tx: TenantTx,
+    tenantId: string,
+    contact: { email: string | null; phone: string | null },
+    excludeId?: string,
+  ): Promise<DuplicateClient | null> {
+    const keys = contactKeys(contact.email, contact.phone);
+    if (!keys.email && !keys.phone) return null;
+    const matches: SQL[] = [];
+    if (keys.email) matches.push(sql`(c.email is not null and ${emailKey(sql`c.email`)} = ${keys.email})`);
+    if (keys.phone) matches.push(sql`${phoneKey(sql`c.phone`)} = ${keys.phone}`);
+    const result = await tx.execute<{ id: string; name: string; on_email: boolean }>(sql`
+      select c.id, c.name, ${keys.email ? sql`coalesce(${emailKey(sql`c.email`)} = ${keys.email}, false)` : sql`false`} as on_email
+        from ${clients} c
+       where c.tenant_id = ${tenantId}
+         and (${sql.join(matches, sql` or `)})
+         ${excludeId ? sql`and c.id <> ${excludeId}` : sql``}
+       order by 3 desc, c.created_at asc, c.id asc
+       limit 1
+    `);
+    const row = result.rows[0];
+    return row ? { id: row.id, name: row.name, matchedOn: row.on_email ? 'email' : 'phone' } : null;
+  }
+
+  /**
+   * One import chunk in one statement: each row is matched against the
+   * company's existing clients (by email or phone); rows that match are not
+   * created, the rest are inserted with `importId`, and the import's counters
+   * and stored rows are updated. Duplicates count towards the import's skipped
+   * count. Returns null when the import doesn't exist (nothing is written).
+   * `existingIds` are the clients the duplicate rows matched, so a caller can
+   * still act on them (e.g. add them to a pipeline).
+   */
+  async importRows(
+    tx: TenantTx,
+    data: {
+      tenantId: string;
+      importId: string;
+      rows: ImportRowData[];
+      /** Invalid rows (no name, no contact, bad email), already left out of `rows`. */
+      invalid: number;
+      /** Rows dropped because an earlier row in this chunk had the same email or phone. */
+      repeatedInChunk: number;
+      /** Every row as received, for the import's stored copy. */
+      storedRows: unknown[];
+    },
+  ): Promise<{ created: number; duplicates: number; existingIds: string[] } | null> {
+    const incoming = JSON.stringify(
+      data.rows.map((row, ord) => ({
+        ord,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        custom_details: row.customDetails,
+      })),
+    );
+    const result = await tx.execute<{ found: number; created: number; matched: number; existing_ids: string[] }>(sql`
+      with incoming as (
+        select r.ord, r.name, r.email, r.phone, coalesce(r.custom_details, '{}'::jsonb) as custom_details
+          from jsonb_to_recordset(${incoming}::jsonb)
+            as r(ord int, name text, email text, phone text, custom_details jsonb)
+      ),
+      imp as (
+        select id from ${clientImports} where id = ${data.importId}
+      ),
+      matched as (
+        select i.ord, (
+          select c.id from ${clients} c
+           where c.tenant_id = ${data.tenantId}
+             and (
+               (i.email is not null and c.email is not null and ${emailKey(sql`c.email`)} = ${emailKey(sql`i.email`)})
+               or (${phoneKey(sql`i.phone`)} <> '' and ${phoneKey(sql`c.phone`)} = ${phoneKey(sql`i.phone`)})
+             )
+           order by c.created_at asc, c.id asc
+           limit 1
+        ) as existing_id
+        from incoming i
+      ),
+      ins as (
+        insert into ${clients} (tenant_id, import_id, name, email, phone, custom_details)
+        select ${data.tenantId}, imp.id, i.name, i.email, i.phone, i.custom_details
+          from incoming i
+          join matched m on m.ord = i.ord
+          cross join imp
+         where m.existing_id is null
+         order by i.ord
+        -- Another import creating the same person at the same moment: the
+        -- unique indexes turn it into a skip rather than an error.
+        on conflict do nothing
+        returning 1
+      ),
+      counts as (
+        update ${clientImports}
+           set created_count = created_count + (select count(*) from ins),
+               skipped_count = skipped_count + ${data.invalid + data.repeatedInChunk}
+                 + ((select count(*) from incoming) - (select count(*) from ins)),
+               rows = rows || ${JSON.stringify(data.storedRows)}::jsonb
+         where id = (select id from imp)
+        returning 1
+      )
+      select (select count(*) from imp)::int as found,
+             (select count(*) from ins)::int as created,
+             (select count(*) from incoming)::int as matched,
+             coalesce(
+               (select json_agg(distinct existing_id) from matched where existing_id is not null),
+               '[]'::json
+             ) as existing_ids
+    `);
+    const row = result.rows[0];
+    if (!row?.found) return null;
+    return {
+      created: row.created,
+      duplicates: row.matched - row.created + data.repeatedInChunk,
+      existingIds: row.existing_ids,
+    };
   }
 
   async update(

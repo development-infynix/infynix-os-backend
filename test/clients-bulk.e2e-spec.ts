@@ -31,6 +31,7 @@ describe('clients bulk queries', { timeout: 30_000 }, () => {
   let other: Actor;
 
   const actorFor = (tenant: { id: string }) => ({ user: { role: 'owner' }, tenant }) as unknown as Actor;
+  const otherActor = () => other;
 
   /** An import with `n` linked clients (created_count = n), plus `loose` clients with no import. */
   async function seed(n: number, loose = 0, tenant = actor) {
@@ -109,12 +110,83 @@ describe('clients bulk queries', { timeout: 30_000 }, () => {
     await expect(clientsService.importChunk(actor, { importId: imp.id, clients: rows })).resolves.toEqual({
       created: 490,
       skipped: 10,
+      duplicates: 0,
+      existingClientIds: [],
     });
     const [saved] = await db.select().from(clientImports).where(eq(clientImports.id, imp.id));
     expect(saved.createdCount).toBe(490);
     expect(saved.skippedCount).toBe(10);
     expect(saved.rows).toHaveLength(500);
     expect((await clientsService.list(actor, 1, 50)).total).toBe(490);
+  });
+
+  it('never imports the same person twice: email ignoring case, phone by digits, repeats in the file', async () => {
+    const [known] = await db
+      .insert(clients)
+      .values([
+        { tenantId: actor.tenant.id, name: 'Vishnu', email: `Vishnu-${tag}@Example.test`, phone: null },
+        { tenantId: actor.tenant.id, name: 'Asha', email: null, phone: '+91 80035 09196' },
+      ])
+      .returning({ id: clients.id });
+    const [asha] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, 'Asha'));
+    const [imp] = await db
+      .insert(clientImports)
+      .values({ tenantId: actor.tenant.id, name: `Dupes ${tag}`, fileName: 'dupes.csv', rowCount: 6 })
+      .returning({ id: clientImports.id });
+
+    const result = await clientsService.importChunk(actor, {
+      importId: imp.id,
+      clients: [
+        { name: 'Vishnu again', email: ` vishnu-${tag}@example.TEST ` }, // existing, other case
+        { name: 'Asha again', phone: '+918003509196' }, // existing, other phone format
+        { name: 'New one', email: `new-${tag}@example.test` },
+        { name: 'New one, repeated', email: `NEW-${tag}@example.test` }, // repeat inside the file
+        { name: 'No contact' }, // invalid
+        { name: 'Second new', phone: '+91 22222 33333' },
+      ],
+    });
+
+    expect(result.created).toBe(2);
+    expect(result.skipped).toBe(1);
+    expect(result.duplicates).toBe(3);
+    expect([...result.existingClientIds].sort()).toEqual([known.id, asha.id].sort());
+    const [saved] = await db.select().from(clientImports).where(eq(clientImports.id, imp.id));
+    expect(saved.createdCount).toBe(2);
+    expect(saved.skippedCount).toBe(4); // 1 invalid + 3 duplicates
+    expect(saved.rows).toHaveLength(6);
+    expect((await clientsService.list(actor, 1, 50)).total).toBe(4); // 2 known + 2 new, no copies
+
+    // A second import of the same rows adds nobody.
+    const again = await clientsService.importChunk(actor, {
+      importId: imp.id,
+      clients: [{ name: 'New one', email: `new-${tag}@example.test` }],
+    });
+    expect(again).toMatchObject({ created: 0, duplicates: 1 });
+  });
+
+  it('refuses to add or edit a client into a duplicate, but allows the same person in another company', async () => {
+    const [vishnu] = await db
+      .insert(clients)
+      .values({ tenantId: actor.tenant.id, name: 'Vishnu Nair', email: `vn-${tag}@example.test`, phone: '+91 99999 00000' })
+      .returning({ id: clients.id });
+    const [other] = await db
+      .insert(clients)
+      .values({ tenantId: actor.tenant.id, name: 'Other', email: `other-${tag}@example.test` })
+      .returning({ id: clients.id });
+
+    await expect(clientsService.create(actor, { name: 'Copy', email: `VN-${tag}@example.test` })).rejects.toThrow(
+      'A client with this email already exists: Vishnu Nair.',
+    );
+    await expect(clientsService.create(actor, { name: 'Copy', phone: '+919999900000' })).rejects.toThrow(
+      'A client with this phone number already exists: Vishnu Nair.',
+    );
+    await expect(clientsService.update(actor, other.id, { phone: '+91-99999-00000' })).rejects.toThrow('Vishnu Nair');
+    // Saving a client with its own contact is not a duplicate of itself.
+    await expect(clientsService.update(actor, vishnu.id, { name: 'Vishnu N.' })).resolves.toMatchObject({ name: 'Vishnu N.' });
+    // The same person in another company is fine.
+    await expect(
+      clientsService.create(otherActor(), { name: 'Vishnu elsewhere', email: `vn-${tag}@example.test` }),
+    ).resolves.toMatchObject({ name: 'Vishnu elsewhere' });
   });
 
   it('bulk delete removes the clients and lowers their import count', async () => {

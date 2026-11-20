@@ -44,7 +44,6 @@ describe('ClientImportsService', () => {
   const list = vi.fn<ClientImportsRepository['list']>();
   const find = vi.fn<ClientImportsRepository['find']>();
   const removeWithClients = vi.fn<ClientImportsRepository['removeWithClients']>();
-  const exists = vi.fn<ClientImportsRepository['exists']>();
   const deleteClientChunk = vi.fn<ClientImportsRepository['deleteClientChunk']>();
   const search = vi.fn<ClientImportsRepository['search']>();
   const run = vi.fn(
@@ -58,11 +57,10 @@ describe('ClientImportsService', () => {
     list.mockResolvedValue([summary]);
     find.mockResolvedValue(withRows);
     removeWithClients.mockResolvedValue(3);
-    exists.mockResolvedValue(true);
     deleteClientChunk.mockResolvedValue({ deleted: 100, remaining: 20 });
     service = new ClientImportsService(
       { run } as unknown as TenantDb,
-      { create, list, find, removeWithClients, exists, deleteClientChunk, search } as unknown as ClientImportsRepository,
+      { create, list, find, removeWithClients, deleteClientChunk, search } as unknown as ClientImportsRepository,
     );
   });
 
@@ -111,14 +109,12 @@ describe('ClientImportsService', () => {
 
   it('removes an import together with its linked clients', async () => {
     await expect(service.remove(actor, 'i1')).resolves.toBe(3);
-    expect(exists).not.toHaveBeenCalled(); // the delete statement itself says whether it existed
     expect(find).not.toHaveBeenCalled();
     expect(removeWithClients).toHaveBeenCalledWith(tx, 'i1');
   });
 
   it('deletes a chunk of an import without loading its stored rows', async () => {
     await expect(service.deleteClientChunk(actor, 'i1', 100)).resolves.toEqual({ deleted: 100, remaining: 20 });
-    expect(exists).not.toHaveBeenCalled();
     expect(find).not.toHaveBeenCalled();
     expect(deleteClientChunk).toHaveBeenCalledWith(tx, 'i1', 100);
   });
@@ -129,24 +125,5 @@ describe('ClientImportsService', () => {
     removeWithClients.mockResolvedValue(null);
     await expect(service.deleteClientChunk(actor, 'other', 100)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.remove(actor, 'other')).rejects.toBeInstanceOf(NotFoundException);
-  });
-});
-
-describe('ClientImportsRepository.recordChunk', () => {
-  it('increments both counters with SQL expressions in one update', async () => {
-    const set = vi.fn();
-    const where = vi.fn().mockResolvedValue(undefined);
-    const update = vi.fn(() => ({ set: (...args: unknown[]) => { set(...args); return { where }; } }));
-    const updateTx = { update } as unknown as TenantTx;
-    const repo = new ClientImportsRepository();
-
-    await repo.recordChunk(updateTx, 'i1', 2, 1, []);
-
-    const values = set.mock.calls[0][0] as Record<string, unknown>;
-    expect(update).toHaveBeenCalledOnce();
-    expect(values.createdCount).toBeInstanceOf(SQL);
-    expect(values.skippedCount).toBeInstanceOf(SQL);
-    expect(values.rows).toBeInstanceOf(SQL);
-    expect(where).toHaveBeenCalledOnce();
   });
 });

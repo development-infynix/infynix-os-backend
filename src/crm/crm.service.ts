@@ -341,9 +341,14 @@ export class CrmService {
   /**
    * Creates the CRM record for the pipeline. With `clientId` it attaches an
    * existing client; otherwise it creates the client from the add-client form
-   * in the same transaction, so a failure leaves neither behind.
+   * in the same transaction, so a failure leaves neither behind. If the form's
+   * email or phone already belongs to a client, that client is used instead
+   * (`existingClient: true`), so the directory never gets a second copy.
    */
-  async createDeal(actor: Actor, dto: CreateDealDto): Promise<CrmDealCard> {
+  async createDeal(
+    actor: Actor,
+    dto: CreateDealDto,
+  ): Promise<CrmDealCard & { existingClient: boolean }> {
     try {
       return await this.tenantDb.run(actor.tenant.id, async (tx) => {
         const pipeline = await this.findPipelineOrFail(tx, actor, dto.pipelineId);
@@ -355,13 +360,19 @@ export class CrmService {
           throw new BadRequestException('Stage does not belong to this pipeline');
         }
 
-        const client = await this.resolveClient(tx, actor, dto);
+        const { client, existingClient } = await this.resolveClient(tx, actor, dto);
         const existing = await this.crm.findDealByClient(
           tx,
           pipeline.id,
           client.id,
         );
-        if (existing) throw new ConflictException(CLIENT_ALREADY_IN_PIPELINE);
+        if (existing) {
+          throw new ConflictException(
+            existingClient
+              ? `${client.name} is already a client, and already in this pipeline`
+              : CLIENT_ALREADY_IN_PIPELINE,
+          );
+        }
 
         const position = await this.crm.nextDealPosition(tx, stage.id);
         const deal = await this.crm.createDeal(tx, {
@@ -374,7 +385,7 @@ export class CrmService {
         });
         const card = await this.crm.dealCard(tx, deal.id);
         if (!card) throw new ConflictException('Unable to create the deal');
-        return card;
+        return { ...card, existingClient };
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -469,15 +480,16 @@ export class CrmService {
 
   /* ── Helpers ──────────────────────────────────────────────────────────── */
 
+  /** The deal's client, and whether it was already in the directory (not created now). */
   private async resolveClient(
     tx: TenantTx,
     actor: Actor,
     dto: CreateDealDto,
-  ): Promise<Client> {
+  ): Promise<{ client: Client; existingClient: boolean }> {
     if (dto.clientId) {
       const client = await this.clients.find(tx, dto.clientId);
       if (!client) throw new NotFoundException('Client not found');
-      return client;
+      return { client, existingClient: true };
     }
 
     if (!dto.name) {
@@ -486,13 +498,21 @@ export class CrmService {
     const email = normalizeContact(dto.email);
     const phone = normalizeContact(dto.phone);
     assertContact(email, phone);
-    return this.clients.create(tx, {
+    // Already in the directory (same email or phone): the deal is for that
+    // client, not a second copy of them.
+    const duplicate = await this.clients.findDuplicate(tx, actor.tenant.id, { email, phone });
+    if (duplicate) {
+      const existing = await this.clients.find(tx, duplicate.id);
+      if (existing) return { client: existing, existingClient: true };
+    }
+    const client = await this.clients.create(tx, {
       tenantId: actor.tenant.id,
       name: dto.name,
       email,
       phone,
       customDetails: { ...dto.customDetails },
     });
+    return { client, existingClient: false };
   }
 
   private async seedDefaultPipeline(

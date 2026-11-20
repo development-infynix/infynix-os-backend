@@ -144,6 +144,7 @@ describe('CrmService', () => {
   const findClient = vi.fn<ClientsRepository['find']>();
   const createClient = vi.fn<ClientsRepository['create']>();
   const findClientsByIds = vi.fn<ClientsRepository['findByIds']>();
+  const findDuplicate = vi.fn<ClientsRepository['findDuplicate']>();
   const addExistingClients = vi.fn<CrmRepository['addExistingClients']>();
   let service: CrmService;
 
@@ -185,6 +186,7 @@ describe('CrmService', () => {
     boardColumns.mockResolvedValue({ stages: [stage()], columns: { s1: [] }, totals: { s1: 0 } });
     createPipeline.mockResolvedValue(pipeline({ id: 'p2', name: 'Partners', position: 1 }));
     findClient.mockResolvedValue(client());
+    findDuplicate.mockResolvedValue(null);
     createClient.mockResolvedValue(client());
     findClientsByIds.mockImplementation(async (_tx, ids) => ids.map((id) => client({ id })));
     addExistingClients.mockImplementation(async (_tx, data) => ({
@@ -232,7 +234,7 @@ describe('CrmService', () => {
         reorderStages,
         addExistingClients,
       } as unknown as CrmRepository,
-      { find: findClient, create: createClient, findByIds: findClientsByIds } as unknown as ClientsRepository,
+      { find: findClient, create: createClient, findByIds: findClientsByIds, findDuplicate } as unknown as ClientsRepository,
     );
   });
 
@@ -299,7 +301,31 @@ describe('CrmService', () => {
         createdBy: 'u1',
       }),
     );
-    expect(result).toBe(expected);
+    expect(result).toEqual({ ...expected, existingClient: false });
+  });
+
+  it('uses the existing client when the form\'s email or phone is already in the directory', async () => {
+    findDuplicate.mockResolvedValue({ id: 'c7', name: 'Vishnu Nair', matchedOn: 'phone' });
+    findClient.mockResolvedValue(client({ id: 'c7', name: 'Vishnu Nair' }));
+    dealCard.mockResolvedValue(card({ clientId: 'c7' }));
+
+    const result = await service.createDeal(actor, { pipelineId: 'p1', name: 'Vishnu', phone: '+91 80035 09196' });
+
+    expect(findDuplicate).toHaveBeenCalledWith(tx, 't1', { email: null, phone: '+91 80035 09196' });
+    expect(createClient).not.toHaveBeenCalled();
+    expect(createDeal).toHaveBeenCalledWith(tx, expect.objectContaining({ clientId: 'c7' }));
+    expect(result.existingClient).toBe(true);
+  });
+
+  it('says so when the existing client is already in this pipeline', async () => {
+    findDuplicate.mockResolvedValue({ id: 'c7', name: 'Vishnu Nair', matchedOn: 'email' });
+    findClient.mockResolvedValue(client({ id: 'c7', name: 'Vishnu Nair' }));
+    findDealByClient.mockResolvedValue({ id: 'd7' } as never);
+
+    await expect(
+      service.createDeal(actor, { pipelineId: 'p1', name: 'Vishnu', email: 'vishnu@x.com' }),
+    ).rejects.toThrow('Vishnu Nair is already a client, and already in this pipeline');
+    expect(createDeal).not.toHaveBeenCalled();
   });
 
   it('attaches an existing client in the selected stage', async () => {

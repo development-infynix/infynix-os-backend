@@ -214,6 +214,29 @@ describe('CRM deal moves', { timeout: 30_000 }, () => {
     ).rejects.toThrow('Stage does not belong to this pipeline');
   });
 
+  it('Add deal form reuses an existing client instead of creating a copy', async () => {
+    const [zoe] = await db
+      .insert(clients)
+      .values({ tenantId: actor.tenant.id, name: 'Zoe', email: `zoe-${tag}@example.test`, phone: '+91 70000 11111' })
+      .returning({ id: clients.id });
+
+    // Same phone written differently: the deal is for Zoe, no new client.
+    const deal = await service.createDeal(actor, { pipelineId, stageId: to, name: 'Zoe typed again', phone: '+917000011111' });
+    expect(deal).toMatchObject({ clientId: zoe.id, existingClient: true, name: 'Zoe' });
+    const named = await db.select({ id: clients.id }).from(clients).where(eq(clients.tenantId, actor.tenant.id));
+    expect(named).toHaveLength(5); // a-d from setup plus Zoe: nobody was copied
+
+    // An existing client already in the pipeline is reported by name.
+    await expect(
+      service.createDeal(actor, { pipelineId, name: 'Zoe once more', email: `ZOE-${tag}@example.test` }),
+    ).rejects.toThrow('Zoe is already a client, and already in this pipeline');
+
+    // A genuinely new person is created as before.
+    await expect(
+      service.createDeal(actor, { pipelineId, name: 'Brand new', email: `brand-new-${tag}@example.test` }),
+    ).resolves.toMatchObject({ existingClient: false, name: 'Brand new' });
+  });
+
   it('keeps both of two simultaneous moves into the same stage', async () => {
     // Two open connections, so the second move doesn't lag behind while one connects.
     await Promise.all([pool.query('select 1'), pool.query('select 1')]);

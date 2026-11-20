@@ -93,15 +93,6 @@ export class ClientImportsRepository {
     return row ?? null;
   }
 
-  /** Existence check that never loads the (growing) `rows` payload. */
-  async exists(tx: TenantTx, id: string): Promise<boolean> {
-    const [row] = await tx
-      .select({ id: clientImports.id })
-      .from(clientImports)
-      .where(eq(clientImports.id, id));
-    return Boolean(row);
-  }
-
   async rename(tx: TenantTx, id: string, name: string): Promise<ClientImportSummary | null> {
     const [row] = await tx
       .update(clientImports)
@@ -175,24 +166,4 @@ export class ClientImportsRepository {
     return result.rows[0]?.deleted ?? null;
   }
 
-  /**
-   * One statement per chunk: the counters grow with SQL increments and the
-   * normalized payload is appended, so concurrent chunks cannot lose counts.
-   */
-  async recordChunk(
-    tx: TenantTx,
-    id: string,
-    created: number,
-    skipped: number,
-    rows: ClientImportRow[],
-  ): Promise<void> {
-    await tx
-      .update(clientImports)
-      .set({
-        createdCount: sql`${clientImports.createdCount} + ${created}`,
-        skippedCount: sql`${clientImports.skippedCount} + ${skipped}`,
-        rows: sql`${clientImports.rows} || ${JSON.stringify(rows)}::jsonb`,
-      })
-      .where(eq(clientImports.id, id));
-  }
 }

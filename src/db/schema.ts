@@ -275,6 +275,17 @@ export const clients = pgTable.withRLS(
     // Lets the CRM reference a client through (tenant_id, id), so a deal can
     // never point at another company's client even if RLS is bypassed.
     uniqueIndex('clients_tenant_id_id_key').on(t.tenantId, t.id),
+    // No duplicate people within a company (the same person may be a client
+    // of two companies). Email matches ignoring case and spaces; phone matches
+    // on digits only, so "+91 80035 09196" = "+918003509196". The app checks
+    // first and reports duplicates; these make it airtight under concurrency.
+    // Queries that look clients up by contact must use these exact expressions.
+    uniqueIndex('clients_tenant_email_key')
+      .on(t.tenantId, sql`lower(btrim(${t.email}))`)
+      .where(sql`${t.email} is not null`),
+    uniqueIndex('clients_tenant_phone_key')
+      .on(t.tenantId, sql`regexp_replace(${t.phone}, '\\D', '', 'g')`)
+      .where(sql`regexp_replace(${t.phone}, '\\D', '', 'g') <> ''`),
     check('clients_name_not_blank', sql`length(btrim(${t.name})) > 0`),
     check(
       'clients_contact_required',

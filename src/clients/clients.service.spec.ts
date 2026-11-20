@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientImport, ClientImportsRepository } from './client-imports.repository.js';
 import type { TenantDb, TenantTx } from '../db/tenant-db.js';
@@ -63,9 +63,8 @@ describe('ClientsService', () => {
   const remove = vi.fn<ClientsRepository['remove']>();
   const idsForImport = vi.fn<ClientsRepository['idsForImport']>();
   const findImport = vi.fn<ClientImportsRepository['find']>();
-  const recordChunk = vi.fn<ClientImportsRepository['recordChunk']>();
-  const importExists = vi.fn<ClientImportsRepository['exists']>();
-  const createMany = vi.fn<ClientsRepository['createMany']>();
+  const findDuplicate = vi.fn<ClientsRepository['findDuplicate']>();
+  const importRows = vi.fn<ClientsRepository['importRows']>();
   const importRow: ClientImport = {
     id: 'i1',
     name: 'Contacts',
@@ -84,13 +83,16 @@ describe('ClientsService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findImport.mockResolvedValue(importRow);
-    recordChunk.mockResolvedValue(undefined);
-    importExists.mockResolvedValue(true);
-    createMany.mockImplementation(async (_tx, data) => data.length);
+    findDuplicate.mockResolvedValue(null);
+    importRows.mockImplementation(async (_tx, data) => ({
+      created: data.rows.length,
+      duplicates: data.repeatedInChunk,
+      existingIds: [],
+    }));
     service = new ClientsService(
       { run } as unknown as TenantDb,
-      { find, create, createMany, update, remove, idsForImport } as unknown as ClientsRepository,
-      { find: findImport, exists: importExists, recordChunk } as unknown as ClientImportsRepository,
+      { find, create, update, remove, idsForImport, findDuplicate, importRows } as unknown as ClientsRepository,
+      { find: findImport } as unknown as ClientImportsRepository,
     );
   });
 
@@ -138,46 +140,69 @@ describe('ClientsService', () => {
     });
   });
 
-  it('imports valid rows from a chunk, skips unusable ones and updates the import', async () => {
+  it('refuses to add a client whose email or phone is already in the directory', async () => {
+    findDuplicate.mockResolvedValue({ id: 'c9', name: 'Vishnu Nair', matchedOn: 'email' });
+
+    await expect(service.create(actor, { name: 'Vishnu', email: 'VISHNU@x.com' })).rejects.toThrow(
+      'A client with this email already exists: Vishnu Nair.',
+    );
+    expect(findDuplicate).toHaveBeenCalledWith(tx, 't1', { email: 'VISHNU@x.com', phone: null });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('refuses an edit that would copy another client\'s phone, ignoring the client itself', async () => {
+    find.mockResolvedValue(client({ email: 'a@b.co', phone: null }));
+    findDuplicate.mockResolvedValue({ id: 'c9', name: 'Ben', matchedOn: 'phone' });
+
+    await expect(service.update(actor, 'c1', { phone: '+91 1111' })).rejects.toBeInstanceOf(ConflictException);
+    expect(findDuplicate).toHaveBeenCalledWith(tx, 't1', { email: 'a@b.co', phone: '+91 1111' }, 'c1');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('imports a chunk in one statement: invalid rows skipped, repeats inside the chunk dropped', async () => {
+    importRows.mockResolvedValue({ created: 1, duplicates: 2, existingIds: ['c7'] });
     const rows = [
       { name: 'Good', email: 'A@B.CO', customDetails: { tier: 'gold' } },
       { name: 'No contact' },
       { name: 'Bad email', email: 'not-an-email' },
+      // Same person as row 1 (email differs only in case): never sent to the database.
+      { name: 'Good again', email: ' a@b.co ' },
+      { name: 'Known', phone: '+91 80035 09196' },
     ] as ImportClientRowDto[];
 
     await expect(service.importChunk(actor, { importId: 'i1', clients: rows })).resolves.toEqual({
       created: 1,
       skipped: 2,
+      duplicates: 2,
+      existingClientIds: ['c7'],
     });
-    expect(importExists).toHaveBeenCalledWith(tx, 'i1');
-    expect(findImport).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
-    expect(createMany).toHaveBeenCalledTimes(1);
-    expect(createMany).toHaveBeenCalledWith(tx, [
-      expect.objectContaining({
-        tenantId: 't1',
-        importId: 'i1',
-        email: 'A@B.CO',
-        name: 'Good',
-        customDetails: { tier: 'gold' },
-      }),
-    ]);
-    expect(recordChunk).toHaveBeenCalledWith(tx, 'i1', 1, 2, [
-      { name: 'Good', email: 'A@B.CO', phone: null, customDetails: { tier: 'gold' } },
-      { name: 'No contact', email: null, phone: null, customDetails: {} },
-      { name: 'Bad email', email: 'not-an-email', phone: null, customDetails: {} },
-    ]);
+    expect(importRows).toHaveBeenCalledWith(tx, {
+      tenantId: 't1',
+      importId: 'i1',
+      rows: [
+        { name: 'Good', email: 'A@B.CO', phone: null, customDetails: { tier: 'gold' } },
+        { name: 'Known', email: null, phone: '+91 80035 09196', customDetails: {} },
+      ],
+      invalid: 2,
+      repeatedInChunk: 1,
+      storedRows: [
+        { name: 'Good', email: 'A@B.CO', phone: null, customDetails: { tier: 'gold' } },
+        { name: 'No contact', email: null, phone: null, customDetails: {} },
+        { name: 'Bad email', email: 'not-an-email', phone: null, customDetails: {} },
+        { name: 'Good again', email: 'a@b.co', phone: null, customDetails: {} },
+        { name: 'Known', email: null, phone: '+91 80035 09196', customDetails: {} },
+      ],
+    });
   });
 
   it('rejects a chunk whose import is not in the actor tenant', async () => {
-    importExists.mockResolvedValue(false);
+    importRows.mockResolvedValue(null);
     const rows = [{ name: 'Good', email: 'a@b.co' }] as ImportClientRowDto[];
 
     await expect(service.importChunk(actor, { importId: 'missing', clients: rows })).rejects.toBeInstanceOf(
       NotFoundException,
     );
-    expect(createMany).not.toHaveBeenCalled();
-    expect(recordChunk).not.toHaveBeenCalled();
   });
 
   it('rejects an update that would remove the last contact method', async () => {

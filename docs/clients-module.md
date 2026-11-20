@@ -89,6 +89,16 @@ Checks: row count ≤ 500, non-blank name and file name. RLS and grants match `c
 
 ---
 
+### Duplicates
+
+One person, one client record **per company**. Two clients are the same person when they share an email (ignoring case and surrounding spaces) or a phone number (digits only, so `+91 80035 09196` = `+918003509196`). The same person may be a client of two different companies.
+
+- **Adding or editing by hand** is refused with 409, naming the existing client.
+- **Imports** skip a row whose person is already a client, or repeats an earlier row of the same chunk, and count it as a duplicate. It also counts towards the import's `skipped_count` on the card. The import summary shows "N already in your directory".
+- **The CRM's Add deal form** uses the existing client instead of creating a copy, and the board says so.
+- **The CRM's Import data** adds both the clients the import created and the existing clients its duplicates matched to the pipeline.
+- **In the database**, partial unique indexes `clients_tenant_email_key` (`tenant_id, lower(btrim(email))`) and `clients_tenant_phone_key` (`tenant_id, regexp_replace(phone, '\D', '', 'g')`) make it airtight when two imports run at once. Their migration refuses to run, with a message, while duplicates exist; remove them first (for example by deleting an import that was loaded twice). The app's checks use exactly these expressions (`ClientsRepository.findDuplicate` / `importRows`), so the indexes serve the lookups too.
+
 ## 4. API
 
 Routes are under `/api/v1/clients` and `/api/v1/client-imports`, all guarded by `ClientPolicy.use`:
@@ -102,11 +112,11 @@ Hiding the menu therefore also closes the endpoints; this is the first module wh
 |---|---|---|---|
 | `GET` | `/clients` | `page` (default 1), `pageSize` (default 100, max 100), `q` (optional search), `importId` (optional) | `{ items, total, page, pageSize, totalPages }`; the page and its total come from one query (`count(*) over ()`) |
 | `GET` | `/clients/:id` | — | one `Client`, 404 when missing |
-| `POST` | `/clients` | `{ name, email?, phone?, customDetails? }` | created `Client`, 201 |
+| `POST` | `/clients` | `{ name, email?, phone?, customDetails? }` | created `Client`, 201; 409 "A client with this email already exists: ‹name›." if the email or phone belongs to another client |
 | `PATCH` | `/clients/:id` | any subset of the create fields | updated `Client` |
 | `DELETE` | `/clients/:id` | — | 204; decrements the import's created count if linked |
 | `DELETE` | `/clients` | `{ ids: string[] }`, max 500 | `{ deleted }`; one statement deletes the clients and lowers each affected import's count; unknown or other-company ids are skipped |
-| `POST` | `/clients/import` | `{ importId, clients: ClientInput[] }`, max 500 rows (and under 1 MB) | `{ created, skipped }`, 201 |
+| `POST` | `/clients/import` | `{ importId, clients: ClientInput[] }`, max 500 rows (and under 1 MB) | `{ created, skipped, duplicates, existingClientIds }`, 201: `skipped` = invalid rows, `duplicates` = rows whose person is already a client (or repeated earlier in the chunk), `existingClientIds` = the clients they matched |
 | `POST` | `/client-imports` | `{ name, fileName, rowCount }` | import summary with `id`, 201 |
 | `GET` | `/client-imports` | — | newest import summaries |
 | `GET` | `/client-imports/:id` | — | summary plus stored `rows` |
