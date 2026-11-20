@@ -140,6 +140,7 @@ describe('CrmService', () => {
   const createStage = vi.fn<CrmRepository['createStage']>();
   const nextStagePosition = vi.fn<CrmRepository['nextStagePosition']>();
   const updateStage = vi.fn<CrmRepository['updateStage']>();
+  const reorderStages = vi.fn<CrmRepository['reorderStages']>();
   const findClient = vi.fn<ClientsRepository['find']>();
   const createClient = vi.fn<ClientsRepository['create']>();
   const findClientsByIds = vi.fn<ClientsRepository['findByIds']>();
@@ -152,6 +153,7 @@ describe('CrmService', () => {
     findPipeline.mockResolvedValue(pipeline());
     createPipelineIfAbsent.mockResolvedValue(pipeline());
     createStages.mockResolvedValue([stage()]);
+    reorderStages.mockResolvedValue([{ invalid: false, id: 's1', name: 'Lead In', position: 0 }]);
     findPipelineStages.mockResolvedValue([stage()]);
     findStage.mockResolvedValue(stage());
     findDealByClient.mockResolvedValue(null);
@@ -224,6 +226,7 @@ describe('CrmService', () => {
         createStage,
         nextStagePosition,
         updateStage,
+        reorderStages,
         clientIdsWithDealIn,
         createDeals,
       } as unknown as CrmRepository,
@@ -431,6 +434,28 @@ describe('CrmService', () => {
       ConflictException,
     );
     expect(removeStage).not.toHaveBeenCalled();
+  });
+
+  it('reorders stages with one repository statement and returns the new order', async () => {
+    reorderStages.mockResolvedValue([
+      { invalid: false, id: 's2', name: 'Won', position: 0 },
+      { invalid: false, id: 's1', name: 'Lead In', position: 1 },
+    ]);
+
+    const result = await service.reorderStages(actor, 'p1', ['s2', 's1']);
+
+    expect(reorderStages).toHaveBeenCalledWith(tx, 'p1', ['s2', 's1']);
+    expect(updateStage).not.toHaveBeenCalled();
+    expect(result).toEqual([
+      { id: 's2', name: 'Won', position: 0 },
+      { id: 's1', name: 'Lead In', position: 1 },
+    ]);
+  });
+
+  it('refuses an incomplete stage order', async () => {
+    reorderStages.mockResolvedValue([{ invalid: true, id: 's1', name: 'Lead In', position: 0 }]);
+
+    await expect(service.reorderStages(actor, 'p1', ['s1'])).rejects.toBeInstanceOf(BadRequestException);
   });
 
   /* ── Pipeline access ─────────────────────────────────────────────────── */

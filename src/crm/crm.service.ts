@@ -258,25 +258,15 @@ export class CrmService {
   ): Promise<StageResponse[]> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       await this.findPipelineOrFail(tx, actor, pipelineId);
-      const stages = await this.crm.findPipelineStages(tx, pipelineId);
-      const current = new Set(stages.map((stage) => stage.id));
-      if (
-        stageIds.length !== stages.length ||
-        new Set(stageIds).size !== stageIds.length ||
-        stageIds.some((id) => !current.has(id))
-      ) {
+      // Validation and all the writes happen in one statement: a loop of one
+      // UPDATE per stage would add a round trip per stage.
+      const rows = await this.crm.reorderStages(tx, pipelineId, stageIds);
+      if (!rows.length || rows[0].invalid) {
         throw new BadRequestException(
           'Provide every stage of the pipeline exactly once',
         );
       }
-      const updated: CrmStage[] = [];
-      for (const [position, id] of stageIds.entries()) {
-        const stage = await this.crm.updateStage(tx, id, { position });
-        if (stage) updated.push(stage);
-      }
-      return updated
-        .sort((a, b) => a.position - b.position)
-        .map(toStageResponse);
+      return rows.map(({ id, name, position }) => ({ id, name, position }));
     });
   }
 

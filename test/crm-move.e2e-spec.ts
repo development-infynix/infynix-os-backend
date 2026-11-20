@@ -155,6 +155,28 @@ describe('CRM deal moves', { timeout: 30_000 }, () => {
     ]);
   });
 
+  it('reorders stages in one statement and persists the new board order', async () => {
+    const result = await service.reorderStages(actor, pipelineId, [to, from]);
+
+    expect(result).toEqual([
+      { id: to, name: 'To', position: 0 },
+      { id: from, name: 'From', position: 1 },
+    ]);
+    const after = await service.board(actor, pipelineId, 100);
+    expect(after.stages.map((stage) => stage.id)).toEqual([to, from]);
+    expect(after.stages.map((stage) => stage.position)).toEqual([0, 1]);
+    // Its deals stay with their stages.
+    expect(after.totals).toEqual({ [from]: 4, [to]: 0 });
+  });
+
+  it('rejects an incomplete stage order without changing anything', async () => {
+    const before = (await service.board(actor, pipelineId, 100)).stages.map((stage) => stage.id);
+    await expect(service.reorderStages(actor, pipelineId, [from])).rejects.toThrow(
+      'Provide every stage of the pipeline exactly once',
+    );
+    expect((await service.board(actor, pipelineId, 100)).stages.map((stage) => stage.id)).toEqual(before);
+  });
+
   it('keeps both of two simultaneous moves into the same stage', async () => {
     // Two open connections, so the second move doesn't lag behind while one connects.
     await Promise.all([pool.query('select 1'), pool.query('select 1')]);

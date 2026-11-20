@@ -496,6 +496,58 @@ export class CrmRepository {
   }
 
   /**
+   * Reorders every stage of a pipeline in one statement. `invalid` is set when
+   * the ids aren't a complete, unique set of that pipeline's stages; in that
+   * case nothing is written. The returned stages are in the new board order.
+   */
+  async reorderStages(
+    tx: TenantTx,
+    pipelineId: string,
+    stageIds: string[],
+  ): Promise<{ invalid: boolean; id: string; name: string; position: number }[]> {
+    const list = sql.join(
+      stageIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const result = await tx.execute<{
+      invalid: boolean;
+      id: string;
+      name: string;
+      position: number;
+    }>(sql`
+      with wanted as (
+        select id, ord - 1 as position
+        from unnest(array[${list}]::uuid[]) with ordinality as u(id, ord)
+      ),
+      before as (
+        select id, name, position from ${crmPipelineStages} where pipeline_id = ${pipelineId}
+      ),
+      bad as (
+        select
+          (select count(*) from wanted) <> (select count(*) from before)
+          or (select count(distinct id) from wanted) <> (select count(*) from wanted)
+          or exists (select 1 from wanted w where not exists (select 1 from before b where b.id = w.id)) as invalid
+      ),
+      moved as (
+        update ${crmPipelineStages} s
+           set position = w.position, updated_at = now()
+          from wanted w, bad
+         where s.pipeline_id = ${pipelineId}
+           and s.id = w.id
+           and bad.invalid = false
+           and s.position <> w.position
+        returning s.id, s.position
+      )
+      select bad.invalid, b.id, b.name, coalesce(m.position, b.position)::int as position
+        from before b
+        cross join bad
+        left join moved m on m.id = b.id
+       order by coalesce(m.position, b.position), b.id
+    `);
+    return result.rows;
+  }
+
+  /**
    * Puts `ids` into the stage in that order (positions 0, 1, 2...) in one
    * statement, writing only the rows whose stage or position changes.
    */
