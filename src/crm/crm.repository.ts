@@ -475,18 +475,38 @@ export class CrmRepository {
     return rows.map((row) => row.id);
   }
 
-  async moveDeal(
-    tx: TenantTx,
-    id: string,
-    stageId: string,
-    position: number,
-  ): Promise<CrmDeal | null> {
-    const [row] = await tx
-      .update(crmDeals)
-      .set({ stageId, position })
-      .where(eq(crmDeals.id, id))
-      .returning(dealColumns);
-    return row ?? null;
+  /**
+   * Holds the pipeline's row until the transaction ends, so deal moves in one
+   * pipeline run one after another and each sees the order the last one left.
+   * `NO KEY UPDATE` still lets other transactions insert deals and stages that
+   * reference the pipeline.
+   */
+  async lockPipeline(tx: TenantTx, id: string): Promise<boolean> {
+    const rows = await tx
+      .select({ id: crmPipelines.id })
+      .from(crmPipelines)
+      .where(eq(crmPipelines.id, id))
+      .for('no key update');
+    return rows.length > 0;
+  }
+
+  /**
+   * Puts `ids` into the stage in that order (positions 0, 1, 2...) in one
+   * statement, writing only the rows whose stage or position changes.
+   */
+  async placeDeals(tx: TenantTx, stageId: string, ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    const list = sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    await tx.execute(sql`
+      update ${crmDeals} as d
+      set stage_id = ${stageId}, position = v.ord - 1, updated_at = now()
+      from unnest(array[${list}]::uuid[]) with ordinality as v(id, ord)
+      where d.id = v.id
+        and (d.stage_id <> ${stageId} or d.position <> v.ord - 1)
+    `);
   }
 
   removeDeal(tx: TenantTx, id: string): Promise<void> {

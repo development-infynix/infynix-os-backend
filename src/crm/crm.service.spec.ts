@@ -4,6 +4,7 @@ import type { Client, ClientsRepository } from '../clients/clients.repository.js
 import type { TenantDb, TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import type {
+  CrmDeal,
   CrmDealCard,
   CrmPipeline,
   CrmRepository,
@@ -81,6 +82,19 @@ const card = (overrides: Partial<CrmDealCard> = {}): CrmDealCard => ({
   ...overrides,
 });
 
+const deal = (overrides: Partial<CrmDeal> = {}): CrmDeal => ({
+  id: 'd1',
+  tenantId: 't1',
+  pipelineId: 'p1',
+  stageId: 's1',
+  clientId: 'c1',
+  position: 0,
+  createdBy: 'u1',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
+
 describe('CrmService', () => {
   const run = vi.fn(
     (_tenantId: string, fn: (tx: TenantTx) => Promise<unknown>) => fn(tx),
@@ -97,7 +111,8 @@ describe('CrmService', () => {
   const findDealByClient = vi.fn<CrmRepository['findDealByClient']>();
   const nextDealPosition = vi.fn<CrmRepository['nextDealPosition']>();
   const createDeal = vi.fn<CrmRepository['createDeal']>();
-  const moveDeal = vi.fn<CrmRepository['moveDeal']>();
+  const lockPipeline = vi.fn<CrmRepository['lockPipeline']>();
+  const placeDeals = vi.fn<CrmRepository['placeDeals']>();
   const dealIdsInStage = vi.fn<CrmRepository['dealIdsInStage']>();
   const removeDeal = vi.fn<CrmRepository['removeDeal']>();
   const dealCard = vi.fn<CrmRepository['dealCard']>();
@@ -148,6 +163,8 @@ describe('CrmService', () => {
       updatedAt: new Date(),
     });
     dealCard.mockResolvedValue(card());
+    lockPipeline.mockResolvedValue(true);
+    placeDeals.mockResolvedValue(undefined);
     countDealsInStage.mockResolvedValue(0);
     countPipelines.mockResolvedValue(1);
     listPipelinesFor.mockResolvedValue([pipeline()]);
@@ -180,7 +197,8 @@ describe('CrmService', () => {
         findDealByClient,
         nextDealPosition,
         createDeal,
-        moveDeal,
+        lockPipeline,
+        placeDeals,
         dealIdsInStage,
         removeDeal,
         dealCard,
@@ -333,33 +351,12 @@ describe('CrmService', () => {
     await expect(
       service.moveDeal(actor, 'd1', { stageId: 's2' }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(moveDeal).not.toHaveBeenCalled();
+    expect(placeDeals).not.toHaveBeenCalled();
   });
 
   it('re-indexes both stages when a deal moves', async () => {
-    findDeal.mockResolvedValue({
-      id: 'd1',
-      tenantId: 't1',
-      pipelineId: 'p1',
-      stageId: 's1',
-      clientId: 'c1',
-      position: 0,
-      createdBy: 'u1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    findDeal.mockResolvedValue(deal());
     findStage.mockResolvedValue(stage({ id: 's2', name: 'Qualified', position: 1 }));
-    moveDeal.mockResolvedValue({
-      id: 'd1',
-      tenantId: 't1',
-      pipelineId: 'p1',
-      stageId: 's2',
-      clientId: 'c1',
-      position: 0,
-      createdBy: 'u1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
     dealIdsInStage
       .mockResolvedValueOnce(['d2', 'd3'])
       .mockResolvedValueOnce(['d4']);
@@ -369,12 +366,56 @@ describe('CrmService', () => {
 
     expect(dealIdsInStage).toHaveBeenNthCalledWith(1, tx, 's2');
     expect(dealIdsInStage).toHaveBeenNthCalledWith(2, tx, 's1');
-    expect(moveDeal.mock.calls).toEqual([
-      [tx, 'd2', 's2', 0],
-      [tx, 'd1', 's2', 1],
-      [tx, 'd3', 's2', 2],
-      [tx, 'd4', 's1', 0],
+    expect(placeDeals.mock.calls).toEqual([
+      [tx, 's2', ['d2', 'd1', 'd3']],
+      [tx, 's1', ['d4']],
     ]);
+  });
+
+  it('locks the pipeline before reading the order, and re-reads the deal under the lock', async () => {
+    // Another move put the deal in s3 while this one waited for the lock.
+    findDeal
+      .mockResolvedValueOnce(deal({ stageId: 's1' }))
+      .mockResolvedValueOnce(deal({ stageId: 's3' }));
+    findStage.mockResolvedValue(stage({ id: 's2', name: 'Qualified', position: 1 }));
+    dealIdsInStage.mockResolvedValueOnce(['d2']).mockResolvedValueOnce(['d5']);
+
+    await service.moveDeal(actor, 'd1', { stageId: 's2', position: 0 });
+
+    expect(lockPipeline).toHaveBeenCalledWith(tx, 'p1');
+    const locked = lockPipeline.mock.invocationCallOrder[0];
+    expect(findDeal.mock.invocationCallOrder[1]).toBeGreaterThan(locked);
+    expect(dealIdsInStage.mock.invocationCallOrder[0]).toBeGreaterThan(locked);
+    // The source stage re-indexed is the one the deal is in now, not the stale one.
+    expect(dealIdsInStage).toHaveBeenNthCalledWith(2, tx, 's3');
+    expect(placeDeals).toHaveBeenNthCalledWith(2, tx, 's3', ['d5']);
+  });
+
+  it('reports a deal deleted while the move waited for the lock as not found', async () => {
+    findDeal.mockResolvedValueOnce(deal()).mockResolvedValueOnce(null);
+
+    await expect(service.moveDeal(actor, 'd1', { stageId: 's1' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(placeDeals).not.toHaveBeenCalled();
+  });
+
+  it('pages one column from the given offset, with its total', async () => {
+    dealCardsForStage.mockResolvedValue([card({ id: 'd101' })]);
+    countDealsInStage.mockResolvedValue(101);
+
+    const result = await service.stageDeals(actor, 's1', 100, 100);
+
+    expect(dealCardsForStage).toHaveBeenCalledWith(tx, 's1', 100, 100);
+    expect(result.items.map((item) => item.id)).toEqual(['d101']);
+    expect(result.total).toBe(101);
+  });
+
+  it("reports a column in a pipeline you can't see as not found", async () => {
+    isPipelineMember.mockResolvedValue(false);
+
+    await expect(service.stageDeals(staff, 's1', 0, 100)).rejects.toBeInstanceOf(NotFoundException);
+    expect(dealCardsForStage).not.toHaveBeenCalled();
   });
 
   it('refuses to delete a stage that still holds deals', async () => {
@@ -434,7 +475,8 @@ describe('CrmService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(isPipelineMember).toHaveBeenCalledWith(tx, 'p1', 'u2');
     expect(removeStage).not.toHaveBeenCalled();
-    expect(moveDeal).not.toHaveBeenCalled();
+    expect(lockPipeline).not.toHaveBeenCalled();
+    expect(placeDeals).not.toHaveBeenCalled();
     expect(removeDeal).not.toHaveBeenCalled();
     expect(createDeal).not.toHaveBeenCalled();
   });

@@ -25,6 +25,7 @@ import {
   ListDealsQuery,
   MoveDealDto,
   ReorderStagesDto,
+  StageDealsQuery,
   UpdatePipelineDto,
   UpdateStageDto,
 } from './dto/crm.dto.js';
@@ -117,6 +118,17 @@ export class CrmController {
     @Body() dto: ReorderStagesDto,
   ) {
     return this.crm.reorderStages(actor, id, dto.stageIds);
+  }
+
+  /** The next page of one column: the board loads the first 100 cards, then these as you scroll. */
+  @Get('stages/:id/deals')
+  @Can(CrmPolicy, 'use')
+  stageDeals(
+    @CurrentActor() actor: Actor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: StageDealsQuery,
+  ) {
+    return this.crm.stageDeals(actor, id, query.offset, query.limit);
   }
 
   @Patch('stages/:id')

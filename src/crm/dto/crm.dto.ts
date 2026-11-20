@@ -179,6 +179,22 @@ export class BoardQuery {
   limit: number = 100;
 }
 
+/** ?offset=100&limit=100: the next cards of one board column, in board order. */
+export class StageDealsQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset: number = 0;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit: number = 100;
+}
+
 /** Bulk add from the Clients page: up to 100 existing clients per request. */
 export class AddDealsDto {
   @IsUUID()

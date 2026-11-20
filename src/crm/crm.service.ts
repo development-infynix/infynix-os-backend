@@ -333,6 +333,22 @@ export class CrmService {
     });
   }
 
+  /**
+   * A slice of one column in board order, with the column's current total.
+   * Offsets drift if someone else moves cards meanwhile; the board drops
+   * duplicates, and its next refetch fills any gap.
+   */
+  async stageDeals(actor: Actor, stageId: string, offset: number, limit: number) {
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+      await this.findStageOrFail(tx, actor, stageId);
+      const [items, total] = await Promise.all([
+        this.crm.dealCardsForStage(tx, stageId, limit, offset),
+        this.crm.countDealsInStage(tx, stageId),
+      ]);
+      return { items, total };
+    });
+  }
+
   async getDeal(actor: Actor, id: string): Promise<CrmDealCard> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const card = await this.crm.dealCard(tx, id);
@@ -445,10 +461,17 @@ export class CrmService {
     dto: MoveDealDto,
   ): Promise<CrmDealCard> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const deal = await this.crm.findDeal(tx, id);
-      if (!deal || !(await this.canSee(tx, actor, deal.pipelineId))) {
+      const found = await this.crm.findDeal(tx, id);
+      if (!found || !(await this.canSee(tx, actor, found.pipelineId))) {
         throw new NotFoundException('Deal not found');
       }
+      // Moves in one pipeline queue up here. Without the lock, two quick moves
+      // in the same stage both read the old order and the second one writes
+      // over the first. Re-read the deal once we hold it: a move that ran
+      // while we waited may have changed its stage, or deleted it.
+      await this.crm.lockPipeline(tx, found.pipelineId);
+      const deal = await this.crm.findDeal(tx, id);
+      if (!deal) throw new NotFoundException('Deal not found');
       const stage = await this.crm.findStage(tx, dto.stageId);
       if (!stage || stage.pipelineId !== deal.pipelineId) {
         throw new BadRequestException('Stage does not belong to this pipeline');
@@ -464,15 +487,10 @@ export class CrmService {
         targetIds.length,
       );
       targetIds.splice(index, 0, id);
-      for (const [position, dealId] of targetIds.entries()) {
-        const moved = await this.crm.moveDeal(tx, dealId, stage.id, position);
-        if (!moved) throw new NotFoundException('Deal not found');
-      }
+      await this.crm.placeDeals(tx, stage.id, targetIds);
       if (sourceStageId !== stage.id) {
         const sourceIds = await this.crm.dealIdsInStage(tx, sourceStageId);
-        for (const [position, dealId] of sourceIds.entries()) {
-          await this.crm.moveDeal(tx, dealId, sourceStageId, position);
-        }
+        await this.crm.placeDeals(tx, sourceStageId, sourceIds);
       }
       const card = await this.crm.dealCard(tx, id);
       if (!card) throw new NotFoundException('Deal not found');
