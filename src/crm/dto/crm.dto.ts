@@ -195,7 +195,7 @@ export class StageDealsQuery {
   limit: number = 100;
 }
 
-/** Bulk add from the Clients page: up to 100 existing clients per request. */
+/** Bulk add from the Clients page: up to 500 existing clients per request. */
 export class AddDealsDto {
   @IsUUID()
   pipelineId: string;
@@ -207,7 +207,7 @@ export class AddDealsDto {
 
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(100)
+  @ArrayMaxSize(500)
   @ArrayUnique()
   @IsUUID('all', { each: true })
   clientIds: string[];

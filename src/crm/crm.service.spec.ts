@@ -144,8 +144,7 @@ describe('CrmService', () => {
   const findClient = vi.fn<ClientsRepository['find']>();
   const createClient = vi.fn<ClientsRepository['create']>();
   const findClientsByIds = vi.fn<ClientsRepository['findByIds']>();
-  const clientIdsWithDealIn = vi.fn<CrmRepository['clientIdsWithDealIn']>();
-  const createDeals = vi.fn<CrmRepository['createDeals']>();
+  const addExistingClients = vi.fn<CrmRepository['addExistingClients']>();
   let service: CrmService;
 
   beforeEach(() => {
@@ -188,8 +187,12 @@ describe('CrmService', () => {
     findClient.mockResolvedValue(client());
     createClient.mockResolvedValue(client());
     findClientsByIds.mockImplementation(async (_tx, ids) => ids.map((id) => client({ id })));
-    clientIdsWithDealIn.mockResolvedValue(new Set());
-    createDeals.mockImplementation(async (_tx, rows) => rows.length);
+    addExistingClients.mockImplementation(async (_tx, data) => ({
+      stageFound: true,
+      found: data.clientIds.length,
+      existing: 0,
+      added: data.clientIds.length,
+    }));
     service = new CrmService(
       { run } as unknown as TenantDb,
       {
@@ -227,8 +230,7 @@ describe('CrmService', () => {
         nextStagePosition,
         updateStage,
         reorderStages,
-        clientIdsWithDealIn,
-        createDeals,
+        addExistingClients,
       } as unknown as CrmRepository,
       { find: findClient, create: createClient, findByIds: findClientsByIds } as unknown as ClientsRepository,
     );
@@ -583,30 +585,30 @@ describe('CrmService', () => {
 
   /* ── Bulk add from the Clients page ──────────────────────────────────── */
 
-  it('adds clients at the end of the first stage and skips ones already in the pipeline', async () => {
-    findClientsByIds.mockResolvedValue([client({ id: 'c1' }), client({ id: 'c2' }), client({ id: 'c3' })]);
-    clientIdsWithDealIn.mockResolvedValue(new Set(['c2']));
-    nextDealPosition.mockResolvedValue(7);
+  it('adds clients in one statement and reports what was skipped', async () => {
+    // c2 already has a deal; c9 isn't a client of this company.
+    addExistingClients.mockResolvedValue({ stageFound: true, found: 3, existing: 1, added: 2 });
 
     const result = await service.addDeals(actor, { pipelineId: 'p1', clientIds: ['c1', 'c2', 'c3', 'c9'] });
 
-    expect(createDeals).toHaveBeenCalledWith(tx, [
-      expect.objectContaining({ pipelineId: 'p1', stageId: 's1', clientId: 'c1', position: 7, createdBy: 'u1' }),
-      expect.objectContaining({ pipelineId: 'p1', stageId: 's1', clientId: 'c3', position: 8, createdBy: 'u1' }),
-    ]);
+    expect(addExistingClients).toHaveBeenCalledWith(tx, {
+      tenantId: 't1',
+      pipelineId: 'p1',
+      stageId: undefined,
+      clientIds: ['c1', 'c2', 'c3', 'c9'],
+      createdBy: 'u1',
+    });
     expect(result).toEqual({ added: 2, alreadyInPipeline: 1, notFound: 1 });
   });
 
-  it('lands the deals in the chosen stage', async () => {
-    findPipelineStages.mockResolvedValue([stage({ id: 's1' }), stage({ id: 's2', name: 'Qualified', position: 1 })]);
-
+  it('passes the chosen stage through', async () => {
     await service.addDeals(actor, { pipelineId: 'p1', stageId: 's2', clientIds: ['c1'] });
 
-    expect(createDeals).toHaveBeenCalledWith(tx, [expect.objectContaining({ stageId: 's2', clientId: 'c1' })]);
+    expect(addExistingClients).toHaveBeenCalledWith(tx, expect.objectContaining({ stageId: 's2', clientIds: ['c1'] }));
   });
 
   it('counts a client that got a deal meanwhile as already in the pipeline', async () => {
-    createDeals.mockResolvedValue(1);
+    addExistingClients.mockResolvedValue({ stageFound: true, found: 2, existing: 0, added: 1 });
 
     const result = await service.addDeals(actor, { pipelineId: 'p1', clientIds: ['c1', 'c2'] });
 
@@ -614,10 +616,11 @@ describe('CrmService', () => {
   });
 
   it('refuses a stage from another pipeline', async () => {
+    addExistingClients.mockResolvedValue({ stageFound: false, found: 1, existing: 0, added: 0 });
+
     await expect(
       service.addDeals(actor, { pipelineId: 'p1', stageId: 's9', clientIds: ['c1'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(createDeals).not.toHaveBeenCalled();
   });
 
   it('reports a pipeline outside your access as not found', async () => {
@@ -626,6 +629,6 @@ describe('CrmService', () => {
     await expect(
       service.addDeals(staff, { pipelineId: 'p1', clientIds: ['c1'] }),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(createDeals).not.toHaveBeenCalled();
+    expect(addExistingClients).not.toHaveBeenCalled();
   });
 });

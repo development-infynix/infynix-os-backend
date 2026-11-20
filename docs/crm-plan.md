@@ -82,13 +82,14 @@ Replace the current `CrmEmpty` page. Keep the reference's structure: pipeline se
 - Access list per pipeline.
 - Board: paged per stage, search, drag to move.
 - Deals: create with a new client, bulk-add existing clients, delete.
+- Add deal menu on the board (built 20 Nov 2026): **Form** (one new client as a deal), **Existing import** (tick whole imports; their clients become deals in a chosen stage) and **Import data** (the Clients page's Excel import, then its new clients become deals in a chosen stage). The two import options need the `clients` grant as well as `crm`; without it the button opens the form directly. All three reuse the bulk add (500 per request, retry from the failed chunk, already-in-pipeline skipped).
 - Wire "Move to CRM" on the Clients page.
 - Import delete confirmation mentions deals.
 
 ### Phase 2: Assignment
 
 - The four assignment rules, with the round-robin cursor locked during creation.
-- Assign one deal; bulk distribute and unassign in chunks of 100.
+- Assign one deal; bulk distribute and unassign in chunks of 500, each chunk one statement (see [performance.md](performance.md)).
 - `crm_pipeline_activity` table and history panel.
 
 ### Phase 3: Transfer

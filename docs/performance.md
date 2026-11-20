@@ -21,6 +21,8 @@ A request's speed is set by **how many queries it sends to the database one afte
 | Clients list | 5 trips, ~0.84 s | 4 trips, ~0.66 s | Total via `count(*) over ()` |
 | Delete a 5,000-client import | ~8 trips × 50 requests, ~65 s | 4 trips × 10 requests, ~7 s (estimate) | One statement per chunk; chunks of 500 |
 | Delete 5,000 selected clients | ~15 trips × 10 requests, ~25 s | 4 trips × 10 requests, ~7 s (estimate) | One statement per request |
+| Move 500 clients to CRM | 9 trips × 5 requests, 8.0 s | 5 trips × 1 request, 0.87 s | One statement per chunk; chunks of 500 |
+| Import a 500-row spreadsheet | 6 trips × 5 requests, ~4 s (estimate) | usually 1 request | Size-aware chunks (up to 500 rows or 512 KB) |
 
 Timings were measured from a developer machine by calling the services directly. The two delete rows are estimates from trip counts.
 
@@ -92,6 +94,7 @@ The CRM page waited for the pipeline list before requesting the board, so the tw
 1. **No request waterfalls.** If request B needs an id you can know in advance (a remembered id, a route param), start it at the same time as A rather than after it.
 2. **Prefetch in route loaders** (not awaited) so data starts loading on link hover through the router's preload-on-intent.
 3. **Make bulk chunks as large as the endpoint allows** (currently 500). Each chunk is a whole request with its fixed cost.
+4. **Size chunks by bytes as well as rows when rows can be large.** The server refuses request bodies over 1 MB (Fastify's default). Anything carrying free-form data (custom details, notes) should close a chunk at about 512 KB, like `chunkImportRows` in `frontend/src/lib/clients.ts`. Don't raise the server limit to dodge this.
 
 ---
 

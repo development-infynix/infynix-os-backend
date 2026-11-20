@@ -402,45 +402,6 @@ export class CrmRepository {
     return row ?? null;
   }
 
-  /** Which of these clients already have a deal in the pipeline. */
-  async clientIdsWithDealIn(
-    tx: TenantTx,
-    pipelineId: string,
-    clientIds: string[],
-  ): Promise<Set<string>> {
-    if (!clientIds.length) return new Set();
-    const rows = await tx
-      .select({ clientId: crmDeals.clientId })
-      .from(crmDeals)
-      .where(and(eq(crmDeals.pipelineId, pipelineId), inArray(crmDeals.clientId, clientIds)));
-    return new Set(rows.map((row) => row.clientId));
-  }
-
-  /**
-   * One multi-row INSERT for a bulk add. A client that got a deal in this
-   * pipeline meanwhile is skipped by the unique index, not an error; returns
-   * how many deals were actually created.
-   */
-  async createDeals(
-    tx: TenantTx,
-    rows: {
-      tenantId: string;
-      pipelineId: string;
-      stageId: string;
-      clientId: string;
-      position: number;
-      createdBy: string;
-    }[],
-  ): Promise<number> {
-    if (!rows.length) return 0;
-    const created = await tx
-      .insert(crmDeals)
-      .values(rows)
-      .onConflictDoNothing()
-      .returning({ id: crmDeals.id });
-    return created.length;
-  }
-
   async nextDealPosition(tx: TenantTx, stageId: string): Promise<number> {
     const [{ next }] = await tx
       .select({
@@ -478,6 +439,74 @@ export class CrmRepository {
         desc(crmDeals.id),
       );
     return rows.map((row) => row.id);
+  }
+
+  /**
+   * Bulk add from the Clients page, in one statement: picks the stage (the given
+   * one, or the pipeline's first), keeps the requested clients that exist (RLS
+   * hides other companies'), skips those already in the pipeline, and inserts
+   * the rest at the end of the stage in request order. A client that gets a
+   * deal between the check and the insert is skipped by ON CONFLICT.
+   * `stageFound` is false when the stage isn't in this pipeline: nothing is added.
+   */
+  async addExistingClients(
+    tx: TenantTx,
+    data: {
+      tenantId: string;
+      pipelineId: string;
+      stageId?: string;
+      clientIds: string[];
+      createdBy: string;
+    },
+  ): Promise<{ stageFound: boolean; found: number; existing: number; added: number }> {
+    if (!data.clientIds.length) return { stageFound: true, found: 0, existing: 0, added: 0 };
+    const list = sql.join(
+      data.clientIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const chosenStage = data.stageId ? sql`and s.id = ${data.stageId}` : sql``;
+    const result = await tx.execute<{
+      stage_found: number;
+      found: number;
+      existing: number;
+      added: number;
+    }>(sql`
+      with st as (
+        select s.id from ${crmPipelineStages} s
+         where s.pipeline_id = ${data.pipelineId} ${chosenStage}
+         order by s.position asc, s.id asc
+         limit 1
+      ),
+      req as (
+        select r.id, r.ord from unnest(array[${list}]::uuid[]) with ordinality as r(id, ord)
+      ),
+      found as (
+        select req.id, req.ord from req join ${clients} c on c.id = req.id
+      ),
+      existing as (
+        select d.client_id from ${crmDeals} d
+         where d.pipeline_id = ${data.pipelineId} and d.client_id in (select id from found)
+      ),
+      start as (
+        select coalesce(max(d.position) + 1, 0) as p from ${crmDeals} d where d.stage_id = (select id from st)
+      ),
+      ins as (
+        insert into ${crmDeals} (tenant_id, pipeline_id, stage_id, client_id, position, created_by)
+        select ${data.tenantId}, ${data.pipelineId}, st.id, f.id,
+               (select p from start) + row_number() over (order by f.ord) - 1,
+               ${data.createdBy}
+          from found f cross join st
+         where f.id not in (select client_id from existing)
+        on conflict do nothing
+        returning 1
+      )
+      select (select count(*) from st)::int as stage_found,
+             (select count(*) from found)::int as found,
+             (select count(*) from existing)::int as existing,
+             (select count(*) from ins)::int as added
+    `);
+    const row = result.rows[0];
+    return { stageFound: row.stage_found > 0, found: row.found, existing: row.existing, added: row.added };
   }
 
   /**

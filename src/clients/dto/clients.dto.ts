@@ -161,14 +161,17 @@ export class ImportClientRowDto {
   customDetails?: Record<string, unknown>;
 }
 
-/** At most one chunk of 100 rows per request; the frontend sends chunks in order. */
+/**
+ * One chunk of an import, at most 500 rows (the whole-file cap). The frontend
+ * sizes chunks to stay well under the 1 MB request limit and sends them in order.
+ */
 export class ImportClientsDto {
   @IsUUID()
   importId: string;
 
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(100)
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => ImportClientRowDto)
   clients: ImportClientRowDto[];

@@ -79,6 +79,9 @@ describe('CRM deal moves', { timeout: 30_000 }, () => {
   });
 
   beforeEach(async () => {
+    // Every test starts from From (0), To (1): the stage-reorder test swaps them.
+    await db.update(crmPipelineStages).set({ position: 0 }).where(eq(crmPipelineStages.id, from));
+    await db.update(crmPipelineStages).set({ position: 1 }).where(eq(crmPipelineStages.id, to));
     await db.delete(crmDeals).where(eq(crmDeals.pipelineId, pipelineId));
     await db.delete(clients).where(eq(clients.tenantId, actor.tenant.id));
     const made = await db
@@ -175,6 +178,40 @@ describe('CRM deal moves', { timeout: 30_000 }, () => {
       'Provide every stage of the pipeline exactly once',
     );
     expect((await service.board(actor, pipelineId, 100)).stages.map((stage) => stage.id)).toEqual(before);
+  });
+
+  it('bulk-adds existing clients in one statement: order, end of stage, skips and stage checks', async () => {
+    const extra = await db
+      .insert(clients)
+      .values(['e', 'f', 'g'].map((name) => ({ tenantId: actor.tenant.id, name, email: `${name}-${tag}@example.test` })))
+      .returning({ id: clients.id, name: clients.name });
+    const id = (name: string) => extra.find((c) => c.name === name)!.id;
+
+    const [clientA] = await db
+      .select({ id: crmDeals.clientId })
+      .from(crmDeals)
+      .where(eq(crmDeals.id, deal.a));
+
+    // g before e on purpose: they land in request order. a is already in the pipeline; one id is unknown.
+    const result = await service.addDeals(actor, {
+      pipelineId,
+      clientIds: [id('g'), clientA.id, id('e'), randomUUID()],
+    });
+    expect(result).toEqual({ added: 2, alreadyInPipeline: 1, notFound: 1 });
+
+    const after = await board();
+    expect(after.from.map((r) => [r.name, r.position])).toEqual([
+      ['a', 0], ['b', 1], ['c', 2], ['d', 3], ['g', 4], ['e', 5],
+    ]);
+
+    // An explicit stage, and a stage from another pipeline is refused with nothing added.
+    await expect(service.addDeals(actor, { pipelineId, stageId: to, clientIds: [id('f')] })).resolves.toEqual({
+      added: 1, alreadyInPipeline: 0, notFound: 0,
+    });
+    expect((await board()).to.map((r) => r.name)).toEqual(['f']);
+    await expect(
+      service.addDeals(actor, { pipelineId, stageId: randomUUID(), clientIds: [id('f')] }),
+    ).rejects.toThrow('Stage does not belong to this pipeline');
   });
 
   it('keeps both of two simultaneous moves into the same stage', async () => {

@@ -94,6 +94,29 @@ describe('clients bulk queries', { timeout: 30_000 }, () => {
     expect(none).toMatchObject({ items: [], total: 0 });
   });
 
+  it('imports a full 500-row chunk in one request, counting created and skipped', async () => {
+    const [imp] = await db
+      .insert(clientImports)
+      .values({ tenantId: actor.tenant.id, name: `Big ${tag}`, fileName: 'big.csv', rowCount: 500 })
+      .returning({ id: clientImports.id });
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      name: `row-${i}`,
+      // Every 50th row has no contact: skipped, not failed.
+      email: i % 50 === 0 ? undefined : `row-${i}-${tag}@example.test`,
+      customDetails: { City: 'Pune', Note: 'x'.repeat(40) },
+    }));
+
+    await expect(clientsService.importChunk(actor, { importId: imp.id, clients: rows })).resolves.toEqual({
+      created: 490,
+      skipped: 10,
+    });
+    const [saved] = await db.select().from(clientImports).where(eq(clientImports.id, imp.id));
+    expect(saved.createdCount).toBe(490);
+    expect(saved.skippedCount).toBe(10);
+    expect(saved.rows).toHaveLength(500);
+    expect((await clientsService.list(actor, 1, 50)).total).toBe(490);
+  });
+
   it('bulk delete removes the clients and lowers their import count', async () => {
     const { importId, linked, ids } = await seed(5, 2);
     const loose = ids.filter((id) => !linked.includes(id));

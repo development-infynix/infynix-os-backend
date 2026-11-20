@@ -393,32 +393,21 @@ export class CrmService {
   async addDeals(actor: Actor, dto: AddDealsDto) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const pipeline = await this.findPipelineOrFail(tx, actor, dto.pipelineId);
-      const stages = await this.crm.findPipelineStages(tx, pipeline.id);
-      const stage = dto.stageId ? stages.find((item) => item.id === dto.stageId) : stages[0];
-      if (!stage) throw new BadRequestException('Stage does not belong to this pipeline');
-
       const requested = [...new Set(dto.clientIds)];
-      const found = new Set((await this.clients.findByIds(tx, requested)).map((client) => client.id));
-      const existing = await this.crm.clientIdsWithDealIn(tx, pipeline.id, [...found]);
-      const toAdd = requested.filter((id) => found.has(id) && !existing.has(id));
-
-      const start = await this.crm.nextDealPosition(tx, stage.id);
-      const added = await this.crm.createDeals(
-        tx,
-        toAdd.map((clientId, index) => ({
-          tenantId: actor.tenant.id,
-          pipelineId: pipeline.id,
-          stageId: stage.id,
-          clientId,
-          position: start + index,
-          createdBy: actor.user.id,
-        })),
-      );
+      // One statement: stage check, existing-client and already-in-pipeline filters, and the insert.
+      const result = await this.crm.addExistingClients(tx, {
+        tenantId: actor.tenant.id,
+        pipelineId: pipeline.id,
+        stageId: dto.stageId,
+        clientIds: requested,
+        createdBy: actor.user.id,
+      });
+      if (!result.stageFound) throw new BadRequestException('Stage does not belong to this pipeline');
       return {
-        added,
+        added: result.added,
         // Includes any that got a deal between the check and the insert.
-        alreadyInPipeline: existing.size + (toAdd.length - added),
-        notFound: requested.length - found.size,
+        alreadyInPipeline: result.found - result.added,
+        notFound: requested.length - result.found,
       };
     });
   }

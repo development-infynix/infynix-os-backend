@@ -85,7 +85,7 @@ Checks: row count ≤ 500, non-blank name and file name. RLS and grants match `c
 - **Contact:** at least one of `email` or `phone` must be present. The create DTO enforces this before the request reaches the service; on update the service merges the patch with the stored values and rejects the change if it would leave no contact method.
 - **Email** is lowercased and validated as an email address when provided.
 - **Custom details** must be a plain object. The UI collects string values; the database can hold strings, numbers, booleans or `null`.
-- **Imports** cap at 500 data rows (headers excluded) and each chunk is at most 100 rows. A row with no name/contact or an invalid email is counted as skipped, not failed.
+- **Imports** cap at 500 data rows (headers excluded). A chunk can carry up to 500 rows, but the frontend sizes chunks to stay under the 1 MB request limit (see the import flow below), so a whole file usually goes in one request. A row with no name/contact or an invalid email is counted as skipped, not failed.
 
 ---
 
@@ -100,19 +100,19 @@ Hiding the menu therefore also closes the endpoints; this is the first module wh
 
 | Method | Path | Body / query | Response |
 |---|---|---|---|
-| `GET` | `/clients` | `page` (default 1), `pageSize` (default 100, max 100), `q` (optional search), `importId` (optional) | `{ items, total, page, pageSize, totalPages }` |
+| `GET` | `/clients` | `page` (default 1), `pageSize` (default 100, max 100), `q` (optional search), `importId` (optional) | `{ items, total, page, pageSize, totalPages }`; the page and its total come from one query (`count(*) over ()`) |
 | `GET` | `/clients/:id` | — | one `Client`, 404 when missing |
 | `POST` | `/clients` | `{ name, email?, phone?, customDetails? }` | created `Client`, 201 |
 | `PATCH` | `/clients/:id` | any subset of the create fields | updated `Client` |
 | `DELETE` | `/clients/:id` | — | 204; decrements the import's created count if linked |
-| `DELETE` | `/clients` | `{ ids: string[] }`, max 500 | `{ deleted }`; chunks ids 100 at a time and decrements import counts |
-| `POST` | `/clients/import` | `{ importId, clients: ClientInput[] }`, max 100 rows | `{ created, skipped }`, 201 |
+| `DELETE` | `/clients` | `{ ids: string[] }`, max 500 | `{ deleted }`; one statement deletes the clients and lowers each affected import's count; unknown or other-company ids are skipped |
+| `POST` | `/clients/import` | `{ importId, clients: ClientInput[] }`, max 500 rows (and under 1 MB) | `{ created, skipped }`, 201 |
 | `POST` | `/client-imports` | `{ name, fileName, rowCount }` | import summary with `id`, 201 |
 | `GET` | `/client-imports` | — | newest import summaries |
 | `GET` | `/client-imports/:id` | — | summary plus stored `rows` |
 | `PATCH` | `/client-imports/:id` | `{ name }` | renamed import summary |
-| `DELETE` | `/client-imports/:id/clients` | `limit` (default 100, max 500) | `{ deleted, remaining }` for one batch |
-| `DELETE` | `/client-imports/:id` | — | 204; deletes any remaining linked clients in 100-row chunks, then the import |
+| `DELETE` | `/client-imports/:id/clients` | `limit` (default 100, max 500; the frontend sends 500) | `{ deleted, remaining }` for one batch, in one statement that also lowers the import's count; 404 if the import doesn't exist |
+| `DELETE` | `/client-imports/:id` | — | 204; one statement deletes any remaining linked clients and the import; 404 if it doesn't exist |
 
 Search `q` matches name, email or phone case-insensitively; `%` and `_` typed by the user are escaped so they match literally. Results are ordered by `updated_at` descending, then `created_at` descending, then `id` descending as a stable tie-breaker — the most recently touched client is first.
 
@@ -123,13 +123,14 @@ Backend files:
 - `src/clients/dto/client-imports.dto.ts` — import create/rename/chunk-query validation
 - `src/clients/client.policy.ts` — grant-based authorization
 - `src/clients/clients.repository.ts` — SQL, search, ordering, pagination, bulk deletes
-- `src/clients/clients.service.ts` — tenant transactions, contact rules, chunked deletes, import counters
+- `src/clients/clients.service.ts` — tenant transactions, contact rules, bulk deletes, import counters
 - `src/clients/clients.controller.ts` — client HTTP routes
-- `src/clients/client-imports.repository.ts` — import records, counters, chunked client deletion
+- `src/clients/client-imports.repository.ts` — import records, counters, one-statement chunk and import deletes
 - `src/clients/client-imports.service.ts` — import lifecycle inside tenant transactions
 - `src/clients/client-imports.controller.ts` — import HTTP routes
 - `src/clients/clients.module.ts` — registration in `AppModule`
 - `src/clients/*.spec.ts` — contact rules, custom details, chunk and counter behavior
+- `test/clients-bulk.e2e-spec.ts` — the one-statement list, bulk delete, import deletes and a full 500-row import chunk, against the real database
 
 ---
 
@@ -141,7 +142,7 @@ Backend files:
 - `clientQuery(id)` — one client for the drawer
 - `clientImportsQuery()` / `clientImportQuery(id)` — import summaries and detail rows
 - `addClient`, `updateClient`, `removeClient`, `removeClients`
-- `createClientImport`, `importClientsChunk`
+- `createClientImport`, `importClientsChunk`, `chunkImportRows` (size-aware chunks: up to 500 rows or 512 KB)
 - `renameClientImport`, `deleteImportClientChunk`, `deleteClientImport`
 - `detailsToRows` / `rowsToDetails` convert between the JSON object and the key/value editor
 
@@ -152,7 +153,7 @@ Backend files:
 The page has **Clients** and **Imports** tabs styled as the recessed segmented control; the active tab is remembered in local storage across refreshes. The Add client button stays available on both tabs. On the Clients tab:
 
 - Search and funnel filter are shown normally.
-- Selecting one or more clients replaces them with a red **Delete N** button. Bulk delete uses `DELETE /clients` (chunked server-side) and invalidates both clients and imports.
+- Selecting one or more clients replaces them with a red **Delete N** button. Bulk delete sends the selection to `DELETE /clients` 500 ids per request and invalidates both clients and imports.
 - When clients are selected, Add client is replaced by an unwired **CRM** button (`MdKeyboardDoubleArrowRight`, arrow hidden on mobile).
 - The funnel filter offers **All clients** plus one option per import; selecting one updates `?importId=`, so the server returns only that import's clients.
 
@@ -167,7 +168,7 @@ Desktop is a table with a narrow select circle column, Name, Email, Phone, Added
 `ClientImportCard` owns one card and its settings menu (`VscSettingsCompact`):
 
 - **Rename** — inline edit in the card header: green tick saves, X cancels. The settings icon is hidden while editing.
-- **Delete** — for >100 clients, the confirm dialog replaces Cancel/Delete with a red progress bar while `DELETE /client-imports/:id/clients` runs in 100-row batches; then the import record is deleted. For ≤100 clients the server handles it in one request.
+- **Delete** — for more than 500 clients, the confirm dialog replaces Cancel/Delete with a red progress bar while `DELETE /client-imports/:id/clients` runs in 500-client batches (`IMPORT_DELETE_CHUNK`); then the import record is deleted. For 500 or fewer the server handles it in one request.
 - **Move to CRM** — disabled placeholder.
 
 ### Add client
@@ -187,7 +188,7 @@ Each row is `key`, `value`, then one action button. Only the last row shows `+`;
 3. **Select fields** — pick remaining columns to keep as custom details. Only Back and Next are shown.
 4. **Preview** — type an import name (required, not prefilled), then see the first five mapped rows before importing. Only Back and Import are shown.
 
-Submitting first creates a `client_imports` record with the chosen name and file details, then splits valid rows into chunks of 100 and posts each chunk to `POST /clients/import` with that `importId`. Each created client stores the same `import_id`. During the import the stepper becomes a progress bar; the submit button reads “Importing…”. The server counts rows with no name/contact or an invalid email as skipped and increments the import counters atomically. Both `CLIENTS_KEY` and `CLIENT_IMPORTS_KEY` are invalidated when all chunks finish.
+Submitting first creates a `client_imports` record with the chosen name and file details, then splits valid rows into chunks by size with `chunkImportRows` and posts each chunk to `POST /clients/import` with that `importId`. A chunk holds up to 500 rows but closes early once its JSON reaches 512 KB, half of Fastify's 1 MB default body limit, because custom details have no size cap. A typical file goes in one request; a very wide one in a few (for example 30 columns of 50 characters: two). The progress bar advances per chunk. Each created client stores the same `import_id`. During the import the stepper becomes a progress bar; the submit button reads “Importing…”. The server counts rows with no name/contact or an invalid email as skipped and increments the import counters atomically. Both `CLIENTS_KEY` and `CLIENT_IMPORTS_KEY` are invalidated when all chunks finish.
 
 ### Mobile layout
 
