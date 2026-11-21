@@ -1,6 +1,16 @@
 import { Transform } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsIn, IsOptional, IsUUID } from 'class-validator';
 
+/** One chunk of deals to delete (the board's Select › Delete). */
+export class DeleteDealsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  dealIds: string[];
+}
+
 /**
  * One transfer chunk: `move` re-points the deals; `copy` (Add to another
  * pipeline) leaves them and creates new deals in the target.

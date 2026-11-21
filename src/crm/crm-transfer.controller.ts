@@ -4,7 +4,7 @@ import { CurrentActor } from '../tenancy/actor.resolver.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import { CrmTransferService } from './crm-transfer.service.js';
 import { CrmPolicy } from './crm.policy.js';
-import { DealIdsQuery, TransferDealsDto } from './dto/crm-transfer.dto.js';
+import { DealIdsQuery, DeleteDealsDto, TransferDealsDto } from './dto/crm-transfer.dto.js';
 
 /**
  * Deal transfer: /api/v1/crm (docs/deal-transfer.md). Listing a stage's deal
@@ -25,5 +25,12 @@ export class CrmTransferController {
   @Can(CrmPolicy, 'manage')
   run(@CurrentActor() actor: Actor, @Body() dto: TransferDealsDto) {
     return this.transfer.run(actor, dto);
+  }
+
+  /** The board's Select › Delete: up to 500 deals per request; `use`, like deleting one deal. */
+  @Post('deals/delete')
+  @Can(CrmPolicy, 'use')
+  deleteMany(@CurrentActor() actor: Actor, @Body() dto: DeleteDealsDto) {
+    return this.transfer.deleteMany(actor, dto);
   }
 }

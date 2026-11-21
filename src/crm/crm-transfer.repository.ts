@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
-import { clients, crmDeals, crmPipelineStages, crmPipelines } from '../db/schema.js';
+import { clients, crmDeals, crmPipelineStages, crmPipelineUsers, crmPipelines } from '../db/schema.js';
 import type { TenantTx } from '../db/tenant-db.js';
 import { eligibleOwners } from './crm-assignment.repository.js';
 
@@ -292,5 +292,27 @@ export class CrmTransferRepository {
       unassigned: row.unassigned,
       skipped: row.skipped,
     };
+  }
+
+  /**
+   * Deletes the given deals in one statement, only those in pipelines the
+   * person can see (the Owner sees every pipeline; anyone else, the ones
+   * they're on). Returns how many went.
+   */
+  async deleteMany(tx: TenantTx, data: { dealIds: string[]; userId: string; isOwner: boolean }): Promise<number> {
+    const visible = data.isOwner
+      ? sql`true`
+      : sql`exists (
+          select 1 from ${crmPipelineUsers} u where u.pipeline_id = d.pipeline_id and u.user_id = ${data.userId}
+        )`;
+    const result = await tx.execute<{ deleted: number }>(sql`
+      with gone as (
+        delete from ${crmDeals} d
+         where d.id = any(${uuidArray(data.dealIds)}) and ${visible}
+        returning 1
+      )
+      select count(*)::int as deleted from gone
+    `);
+    return result.rows[0].deleted;
   }
 }

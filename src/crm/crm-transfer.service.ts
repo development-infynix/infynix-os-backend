@@ -4,7 +4,7 @@ import { TenantDb, type TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import { CrmTransferRepository } from './crm-transfer.repository.js';
 import { CrmRepository } from './crm.repository.js';
-import type { TransferDealsDto } from './dto/crm-transfer.dto.js';
+import type { DeleteDealsDto, TransferDealsDto } from './dto/crm-transfer.dto.js';
 
 /**
  * Deal transfer (docs/deal-transfer.md): moving deals, chosen by whole
@@ -89,6 +89,22 @@ export class CrmTransferService {
   }
 
   /** Owners see every pipeline; everyone else only those they're on (404 otherwise, so nothing leaks). */
+  /**
+   * One chunk of the board's Select › Delete. Deals that are gone already, or
+   * in a pipeline the person can't see, are counted as missing, not errors.
+   */
+  deleteMany(actor: Actor, dto: DeleteDealsDto): Promise<{ deleted: number; missing: number }> {
+    const dealIds = [...new Set(dto.dealIds)];
+    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const deleted = await this.transfer.deleteMany(tx, {
+        dealIds,
+        userId: actor.user.id,
+        isOwner: actor.user.role === 'owner',
+      });
+      return { deleted, missing: dealIds.length - deleted };
+    });
+  }
+
   private async assertCanSee(tx: TenantTx, actor: Actor, pipelineId: string): Promise<void> {
     const visible =
       actor.user.role === 'owner'

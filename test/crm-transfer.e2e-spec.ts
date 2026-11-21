@@ -228,6 +228,27 @@ describe('CRM deal transfer: Move and Add', { timeout: 90_000 }, () => {
     ).rejects.toThrow('already in this pipeline');
   });
 
+  it('Select › Delete removes only deals in pipelines the person can see', async () => {
+    const mine = await deals(source.id, source.s1, 3, 'del');
+    // A pipeline staff member A isn't on.
+    const [hidden] = await db.insert(crmPipelines).values({ tenantId, name: `Hidden ${tag}` }).returning({ id: crmPipelines.id });
+    const [hiddenStage] = await db
+      .insert(crmPipelineStages)
+      .values({ tenantId, pipelineId: hidden.id, name: 'Only', position: 0 })
+      .returning({ id: crmPipelineStages.id });
+    const [secret] = await deals(hidden.id, hiddenStage.id, 1, 'hid');
+    const staffA = { user: { id: ids.a, role: 'staff', tenantId }, tenant: { id: tenantId } } as unknown as Actor;
+
+    const result = await service.deleteMany(staffA, { dealIds: [mine[0].id, mine[1].id, secret.id] });
+    expect(result).toEqual({ deleted: 2, missing: 1 });
+    expect((await inStage(source.s1)).map((d) => d.id)).toEqual([mine[2].id]);
+    expect(await inStage(hiddenStage.id)).toHaveLength(1);
+
+    // The Owner sees every pipeline; deals already gone count as missing.
+    expect(await service.deleteMany(owner, { dealIds: [secret.id, mine[0].id] })).toEqual({ deleted: 1, missing: 1 });
+    await db.delete(crmPipelines).where(eq(crmPipelines.id, hidden.id));
+  });
+
   it('moves a full 500-deal chunk in one request', async () => {
     const many = await deals(source.id, source.s1, 500, 'm');
     const result = await service.run(owner, { mode: 'move', dealIds: many.map((d) => d.id), targetPipelineId: target.id });
