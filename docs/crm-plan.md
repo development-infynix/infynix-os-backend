@@ -2,7 +2,7 @@
 
 Port of the CRM from our earlier single-tenant ERP to Infynix OS (multi-tenant).
 
-- **Status (21 Nov 2026):** Phase 1 nearly done; Phase 2 built; Phase 3 not started. Details in **Phases** below.
+- **Status (21 Nov 2026):** Phases 1–3 built (Core, Assignment, Transfer). Left: delete confirmations that mention deals, manual run-throughs, and the activity log. Details in **Phases** below.
 - **Reference backend:** https://github.com/explorewings/erp-backend/tree/main/src/crm (schema: `src/schema/crm.ts`)
 - **Reference frontend:** https://github.com/explorewings/erp-frontend/tree/main/src/crm
 - **Related docs:**
@@ -80,7 +80,7 @@ The structure follows the reference: pipeline selector, board, deal details draw
 
 ## Phases
 
-### Phase 1: Core (nearly done)
+### Phase 1: Core (built)
 
 Built:
 - [x] Schema and migrations for pipelines, stages, access list and deals, with RLS.
@@ -91,6 +91,8 @@ Built:
   - 100 cards per column, then 100 more as you scroll (infinite scroll), with the stage's true total in the header
   - drag to move or reorder with an optimistic save; moves in one pipeline queue under a row lock so two quick moves can't undo each other
   - search in its own modal (server-side, debounced, this pipeline only)
+  - **Select mode:** tick cards, then the Select button's menu offers **Move to pipeline**, **Add to pipeline** (Owner and managers) and **Delete** (with a confirmation; `POST /crm/deals/delete`, 500 per request, only deals in pipelines you can see)
+  - **Card options** (the settings icon on each card): a floating menu with **Add to pipeline**, **Move to pipeline** (Owner and managers) and **Delete** (`DELETE /crm/deals/:id`, with a confirmation)
 - [x] **Deals:**
   - created from the Add deal menu:
     - **Form:** one new client, or the existing client with that email or phone
@@ -99,11 +101,10 @@ Built:
   - bulk-added from the Clients page with **Move to CRM**, either from a selection or from an import card's menu
   - all of these use one bulk-add statement: 500 clients per request, retry from a failed chunk, clients already in the pipeline skipped
   - the two import options need the `clients` grant as well as `crm`
-- [x] **Deal details drawer:** stage, pipeline, owner (with a picker for the Owner and managers), the added date, the client's fields and custom details. The History tab is a placeholder until Phase 2's log exists.
+- [x] **Deal details drawer:** the header holds only the **Details / History** tabs and close (the client's name is in the panel below). Panels in order: **Client** (name, email, phone), **Deal** (stage, pipeline, owner, added date) and **Custom details**. The Owner and managers change the owner with the app's standard dropdown (button and list, not the browser select); Escape closes the list, not the drawer. The History tab is a placeholder until Phase 2's log exists.
 - [x] **Performance:** the board, the pipeline list and every bulk action follow [performance.md](performance.md). Opening the CRM went from about 4 s to about 1 s from a developer machine.
 
 Still to do:
-- [ ] **Delete a deal from the board.** `DELETE /crm/deals/:id` exists, but there's no UI yet; the options button on each card isn't wired.
 - [ ] **Delete confirmations should mention deals.** Deleting an import, or a client, also deletes their deals; neither confirmation says so yet.
 
 ### Phase 2: Assignment (built 20–21 Nov 2026)
@@ -122,15 +123,24 @@ See [user-deals-assignment.md](user-deals-assignment.md).
 - [ ] Manual run-through of the checklist in section 8 of user-deals-assignment.md.
 - [ ] `crm_pipeline_activity` table and the history panel (deal assignment history, and the deal drawer's History tab).
 
-### Phase 3: Transfer (not started)
+### Phase 3: Transfer (built 21 Nov 2026)
 
-- [ ] Move or copy deals between pipelines, 500 per request, with skipped deals reported. Owners follow the reference: cleared, then reassigned only if the target pipeline uses Round robin or Single user.
-- [ ] The **Deal transfer** card in Actions (unwired today) opens it. The board's "Move to pipeline / Add to pipeline" selection actions should use it too.
+See [deal-transfer.md](deal-transfer.md).
+
+- [x] **Move** and **Add** (copy) deals to another pipeline through one endpoint, 500 per request, with skipped clients named. Owners follow the reference: cleared, then reassigned only if the target uses Round robin or Single user.
+- [x] **Three ways in**, all the same drawer:
+  - the **Deal transfer** card in Actions (a menu card: Add / Move), by whole stages: **Select · Stages · Destination**
+  - the board's **Select** menu, for the ticked cards
+  - a card's **options** menu, for that one deal
+  The last two open straight at Destination.
+- [x] A strip above the footer says what the target's assignment rule will do to owners.
+- [x] **Tests:** 8 e2e tests (Move, Add, owners by rule, errors, a 500-deal chunk, and bulk delete).
+- [ ] Manual run-through of section 8 of deal-transfer.md.
+- [ ] Selecting deals **By fields** (shown as Coming soon).
 
 ### Not yet planned
 
 - The **Payment actions** and **Qualification actions** cards in Actions are placeholders.
-- The board's selection menu (**Move to pipeline**, **Add to pipeline**, **Delete**) isn't wired.
 
 ---
 

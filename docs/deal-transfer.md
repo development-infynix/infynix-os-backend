@@ -2,9 +2,9 @@
 
 Moving deals to another pipeline, or adding them to another pipeline as well, by choosing whole stages. Phase 3 of [crm-plan.md](crm-plan.md).
 
-- **Status:** **built 21 Nov 2026**: Move to Pipeline and Add to Pipeline. The manual checks in section 8 are pending.
+- **Status:** **built 21 Nov 2026**: Move and Add to pipeline, from the Actions card, the board's Select menu and each card's options menu; plus bulk delete for Select. The manual checks in section 8 are pending.
 - **Code:** backend `src/crm/crm-transfer.{repository,service,controller}.ts` and `dto/crm-transfer.dto.ts`; frontend `src/crm/components/DealTransferDrawer.tsx` and the shared `PipelineOption` picker
-- **Tests:** `test/crm-transfer.e2e-spec.ts` (7 tests against the real database: deal ids beyond 100, Move order and positions, landing stage and duplicates, owners by target rule with the cursor, Add leaving the source and creating new deals, the error cases, a 500-deal chunk)
+- **Tests:** `test/crm-transfer.e2e-spec.ts` (8 tests against the real database: deal ids beyond 100, Move order and positions, landing stage and duplicates, owners by target rule with the cursor, Add leaving the source and creating new deals, the error cases, a 500-deal chunk, bulk delete limited to visible pipelines)
 - **Reference:** the earlier ERP's `explorewings/docs/crm-deal-transfer.md` (WI-2 Move, WI-3 Add) and its code: `erpnestbackend/src/crm/crm-deals.service.ts` (`transferDeals`, `listDealIdsByStages`) and `erpfrontend/src/crm/components/deal-transfer-drawer.jsx`. The behaviour carries over; the changes are in section 2.
 - **Related:**
   - [user-deals-assignment.md](user-deals-assignment.md): owners, rules and eligibility, which this reuses
@@ -75,6 +75,7 @@ Every request runs inside `TenantDb.run()`.
 | Method | Path | Who | Body → response |
 |---|---|---|---|
 | `GET` | `/pipelines/:id/deal-ids?stageIds=a,b` | pipeline viewers | → `{ ids }`: every deal in those stages, in source order. 1–100 stage ids; a stage of another pipeline is ignored; an invisible pipeline is 404. |
+| `POST` | `/deals/delete` | pipeline viewers (`use`) | `{ dealIds (1–500, unique uuids) }` → `{ deleted, missing }`. One statement; only deals in pipelines the person can see are deleted, the rest count as missing. Used by the board's Select › Delete. A single card's Delete uses the existing `DELETE /deals/:id`. |
 | `POST` | `/deals/transfer` | manage | `{ mode: 'move' \| 'copy', dealIds (1–500, unique uuids), targetPipelineId, targetStageId? }` → `{ mode, moved?, added?, unassigned, missing, skipped: [{ dealId, clientName }] }` (`moved` for Move, `added` for Add) |
 
 Errors: mixed source pipelines, the same pipeline as target, or a landing stage outside the target are 400; an invisible source or target is 404; a staff member is 403.
@@ -85,7 +86,10 @@ After a transfer, the board, the pipeline list and the assignment overview are r
 
 ## 6. Frontend
 
-- **Entry point:** the **Deal transfer** card in CRM › Actions is a menu card (the shared `MenuCard`, also used by Manage pipeline). Its whole surface opens a menu with **Add to pipeline** and **Move to pipeline**. Only the Owner and managers get the menu (T8).
+- **Entry points**, all opening the same `DealTransferDrawer`; Add and Move appear only for the Owner and managers (T8):
+  - **Actions › Deal transfer:** a menu card (the shared `MenuCard`, also used by Manage pipeline) with **Add to pipeline** and **Move to pipeline**. Deals are chosen by whole stages, through all three steps.
+  - **Board › Select:** the Select button's menu offers **Move to pipeline**, **Add to pipeline** and **Delete** for the ticked cards. Move and Add pass those deal ids (`dealIds` prop): the drawer opens at Destination with no steps strip, and select mode ends when the run finishes.
+  - **Card options:** the settings icon on each card opens a floating menu (`DealOptionsMenu`, portaled so the scrolling column can't clip it) with **Add to pipeline**, **Move to pipeline** and **Delete** for that one deal. Add and Move open the drawer at Destination like Select.
 - **The drawer** opens set to the chosen action, a right-side sheet like the others. It can't be closed while running.
   - **Header:** **Add to pipeline** or **Move to pipeline** (with its icon), the source pipeline's name, and close.
   - **Steps strip:** **Select · Stages · Destination**, with done steps ticked and the current one in green.
