@@ -40,7 +40,7 @@ crm_pipelines ──< crm_deals >── owner_id
 | D6a | **The pipeline's creator is put on its access list** when they create it, unless they're the Owner, so the manager who makes a pipeline can always see it and own its deals. The pipeline records who created it (`created_by`). |
 | D7 | **Deactivated users, or users who lose the `crm` grant, keep their deals.** They can't sign in (or open the CRM), so there's no "No access" badge. They stop receiving new deals because they're no longer eligible. |
 | D8 | **Assignment source** (`crm_deals.assignment_source`): `round_robin`, `single_user` or `creator` when the rule or a tool assigned it, `manual` when a person picked the owner in the deal drawer. It means something only while `owner_id` is set. |
-| D9 | **Unassign or transfer.** Wherever deals would lose their owner (the per-user **Unassign** tool, or removing someone from the access list), the confirmation has two buttons: **Unassign** (the deals become unassigned) and **Transfer** (they move to another eligible person on the same pipeline). **Transfer only changes the owner**: it has nothing to do with the assignment rules, never changes the pipeline's rule, and each deal keeps its source. |
+| D9 | **Unassign, and transfer on removal.** Each person's row in the Round robin and Single user cards has an **Unassign ▾** link, as in the reference: a small menu with this card's deals or all their deals (with counts; an option is disabled when it would remove nothing or the same deals as the other), then a confirmation. **Removing someone from Access users** who owns deals asks **Unassign** or **Transfer to…** (another eligible person staying on the pipeline). **Transfer only changes the owner**: it has nothing to do with the assignment rules, never changes the pipeline's rule, and each deal keeps its source. The backend's per-person transfer endpoint exists but has no UI for now.
 | D10 | **Bulk tools run 500 deals per request**, each request one SQL statement under the pipeline lock, looping until nothing remains, with progress (see [performance.md](performance.md)). |
 | D11 | **Who can change things:** for now, the existing CRM `manage` check (Owner and managers, in pipelines they can see). Everyone with pipeline access can read the drawer. Fine-grained rights come later from System settings. |
 | D12 | **Owner on deals:** each deal card and the deal drawer show the owner; the drawer lets a manager or Owner pick or clear it by hand (source `manual`). |
@@ -129,8 +129,8 @@ The board and the deal endpoints add `ownerId`, `ownerName` and `assignmentSourc
   - tiles: **Total**, **Assigned**, **Unassigned**
   - then four `card-3d` cards: **Round robin**, **Single user**, **Creator**, **Manual**
   - each card's radio means "Use for new deals", with a confirmation ("Existing deals keep their owners."). The active rule's card is outlined and badged **New deals**.
-  - **Round robin** card: each person's round-robin count with a bar and **Unassign / Transfer**, then **Share N unassigned deals**, then **Revert round robin**
-  - **Single user** card: pick a person, then **Give N unassigned deals to X** and **Use for new deals**; each person's deal count with **Unassign / Transfer**
+  - **Round robin** card: each person's round-robin count with a bar and **Unassign ▾**, then **Share N unassigned deals**, then **Revert round robin**
+  - **Single user** card: pick a person, then **Give N unassigned deals to X** and **Use for new deals**; each person's deal count with **Unassign ▾**
   - **Creator** and **Manual** cards: a description only
 - **Progress:** tools loop 500 per request with a progress bar where they were started, then a short result line.
 - **Deal cards and the deal drawer:**
