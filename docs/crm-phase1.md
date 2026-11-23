@@ -1,11 +1,13 @@
-# CRM module plan
+# CRM phase 1: core, assignment and transfer
 
-Port of the CRM from our earlier single-tenant ERP to Infynix OS (multi-tenant).
+Port of the CRM from our earlier single-tenant ERP to Infynix OS (multi-tenant). This doc records what phase 1 built; what comes next is in [crm-phase2-plan.md](crm-phase2-plan.md).
 
-- **Status (23 Nov 2026):** Phases 1–3 built (Core, Assignment, Transfer). Left: manual run-throughs, the activity log and permissions. Details in **Phases** below.
+- **Status (23 Nov 2026):** built: core, assignment and transfer (parts 1–3 below). Left: the manual run-throughs. Permissions, the activity log, payment actions and qualification actions moved to [crm-phase2-plan.md](crm-phase2-plan.md).
 - **Reference backend:** https://github.com/explorewings/erp-backend/tree/main/src/crm (schema: `src/schema/crm.ts`)
 - **Reference frontend:** https://github.com/explorewings/erp-frontend/tree/main/src/crm
 - **Related docs:**
+  - [crm-phase2-plan.md](crm-phase2-plan.md): the next phase
+  - [deal-transfer.md](deal-transfer.md): moving and adding deals between pipelines
   - [user-deals-assignment.md](user-deals-assignment.md): deal owners, rules, bulk tools and the access list
   - [clients-module.md](clients-module.md): clients, imports and the no-duplicates rule
   - [performance.md](performance.md): round-trip rules that every CRM query follows
@@ -74,13 +76,13 @@ Everyone with access to a pipeline sees all of its deals. Ownership affects who 
 | react-icons | lucide (plus `@animateicons/react` for the animated unassign icon) |
 | `@dnd-kit` | `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` |
 
-The structure follows the reference: pipeline selector, board, deal details drawer, create-pipeline wizard, manage pipelines and manage stages drawers, Assign deals drawer (Access users and Deal assign tabs), search modal. Still to come: the history panel and the transfer drawer.
+The structure follows the reference: pipeline selector, board, deal details drawer, create-pipeline wizard, manage pipelines and manage stages drawers, Assign deals drawer (Access users and Deal assign tabs), search modal. The transfer drawer is built; the history panel comes in phase 2.
 
 ---
 
-## Phases
+## What phase 1 built
 
-### Phase 1: Core (built)
+### Part 1: Core (built)
 
 Built:
 - [x] Schema and migrations for pipelines, stages, access list and deals, with RLS.
@@ -101,16 +103,16 @@ Built:
   - bulk-added from the Clients page with **Move to CRM**, either from a selection or from an import card's menu
   - all of these use one bulk-add statement: 500 clients per request, retry from a failed chunk, clients already in the pipeline skipped
   - the two import options need the `clients` grant as well as `crm`
-- [x] **Deal details drawer:** the header holds only the **Details / History** tabs and close (the client's name is in the panel below). Panels in order: **Client** (name, email, phone), **Deal** (stage, pipeline, owner, added date) and **Custom details**. The Owner and managers change the owner with the app's standard dropdown (button and list, not the browser select); Escape closes the list, not the drawer. The History tab is a placeholder until Phase 2's log exists.
+- [x] **Deal details drawer:** the header holds only the **Details / History** tabs and close (the client's name is in the panel below). Panels in order: **Client** (name, email, phone), **Deal** (stage, pipeline, owner, added date) and **Custom details**. The Owner and managers change the owner with the app's standard dropdown (button and list, not the browser select); Escape closes the list, not the drawer. The History tab is a placeholder until the activity log ([crm-phase2-plan.md](crm-phase2-plan.md)).
 - [x] **Performance:** the board, the pipeline list and every bulk action follow [performance.md](performance.md). Opening the CRM went from about 4 s to about 1 s from a developer machine.
 
-Still to do:
+Follow-ups, done 23 Nov:
 - [x] **Delete confirmations mention deals:** deleting a client (one or a selection) or an import says their deals in every CRM pipeline go too.
 - [x] **Fixes from the 23 Nov review:**
   - stage delete takes the pipeline lock before checking the stage is empty, and maps a late foreign-key clash to the friendly 409, never a 500
   - the board drops selected cards that vanished after a refresh, so Move / Add / Delete never send deals someone else moved
 
-### Phase 2: Assignment (built 20–21 Nov 2026)
+### Part 2: Assignment (built 20–21 Nov 2026)
 
 See [user-deals-assignment.md](user-deals-assignment.md).
 
@@ -124,9 +126,8 @@ See [user-deals-assignment.md](user-deals-assignment.md).
 - [x] **Owner on deals:** shown on each card (in place of the added date), and picked by hand in the deal drawer (source `manual`).
 - [x] **Tests:** 9 e2e tests against the real database cover the rules, tools, handover, eligibility and the owner foreign key.
 - [ ] Manual run-through of the checklist in section 8 of user-deals-assignment.md.
-- [ ] `crm_pipeline_activity` table and the history panel (deal assignment history, and the deal drawer's History tab).
 
-### Phase 3: Transfer (built 21 Nov 2026)
+### Part 3: Transfer (built 21 Nov 2026)
 
 See [deal-transfer.md](deal-transfer.md).
 
@@ -140,9 +141,9 @@ See [deal-transfer.md](deal-transfer.md).
 - [x] **Tests:** 8 e2e tests (Move, Add, owners by rule, errors, a 500-deal chunk, and bulk delete).
 - [ ] Manual run-through of section 8 of deal-transfer.md.
 
-### Not yet planned
+### Moved to phase 2
 
-- The **Payment actions** and **Qualification actions** cards in Actions are placeholders.
+Permissions, the activity log, payment actions and qualification actions were deferred on 23 Nov 2026. They're planned in [crm-phase2-plan.md](crm-phase2-plan.md).
 
 ---
 
@@ -150,9 +151,9 @@ See [deal-transfer.md](deal-transfer.md).
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Manager powers | Managers manage pipelines, stages, access lists and assignment in pipelines they're on (the CRM `manage` check). Per-role rights come later from System settings. |
+| 1 | Manager powers | Managers manage pipelines, stages, access lists and assignment in pipelines they're on (the CRM `manage` check). Finer rights come with permissions in phase 2. |
 | 2 | Staff visibility | Staff see every deal in their pipelines, as in the reference. "Only my deals" may come later. |
-| 3 | Client activity log | Not built. To revisit with Phase 2's activity table. |
+| 3 | Client activity log | Not built. To revisit with the activity log in phase 2. |
 | 4 | IDs | `uuid`, done. |
 | 5 | Duplicate clients | One client per email or phone per company (database-enforced); the same person may be a client of other companies. |
 | 6 | Bulk chunk size | 500 per request for every CRM and clients bulk action; Excel import chunks are also capped at 512 KB. |

@@ -6,7 +6,7 @@ Who owns each deal in a pipeline: the pipeline's **rule for new deals**, the **b
 - **Code:** `src/crm/crm-assignment.{repository,service,controller}.ts`, the rule inside `CrmRepository.addExistingClients`; frontend `src/crm/components/assign/` and the owner on `KanbanCard` / `DealDetailsDrawer`
 - **Tests:** `test/crm-assignment.e2e-spec.ts` (9 tests against the real database); see section 7 for what they cover
 - **Reference:** the earlier ERP's `explorewings/docs/crm-deal-assignments.md` (WI-1). The behaviour carries over; the changes are listed in section 2.
-- **Related:** [crm-plan.md](crm-plan.md) (Phase 2: Assignment), [access-model.md](access-model.md), [performance.md](performance.md)
+- **Related:** [crm-phase1.md](crm-phase1.md) (part 2: Assignment), [access-model.md](access-model.md), [performance.md](performance.md)
 - **Backend:** NestJS · Drizzle · PostgreSQL (Neon) with row-level security through `TenantDb.run()`
 - **Frontend:** React · TanStack Query · the `card-3d` surface for cards (see `frontend/DESIGN.md`)
 

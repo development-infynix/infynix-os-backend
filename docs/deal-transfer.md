@@ -1,6 +1,6 @@
 # CRM: deal transfer
 
-Moving deals to another pipeline, or adding them to another pipeline as well, by choosing whole stages. Phase 3 of [crm-plan.md](crm-plan.md).
+Moving deals to another pipeline, or adding them to another pipeline as well, by choosing whole stages. Part 3 of [crm-phase1.md](crm-phase1.md).
 
 - **Status:** **built 21 Nov 2026**: Move and Add to pipeline, from the Actions card, the board's Select menu and each card's options menu; plus bulk delete for Select. The manual checks in section 8 are pending.
 - **Code:** backend `src/crm/crm-transfer.{repository,service,controller}.ts` and `dto/crm-transfer.dto.ts`; frontend `src/crm/components/DealTransferDrawer.tsx` and the shared `PipelineOption` picker
