@@ -1,32 +1,8 @@
-import { Transform } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn } from 'class-validator';
+import { ReportContentDto } from './create-report.dto.js';
 
-const parseReportItems = ({ value }: { value: unknown }) => {
-  if (typeof value !== 'string') return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-};
-
-export class UpdateReportDto {
-  @IsDateString()
-  reportDate!: string;
-
-  @Transform(parseReportItems)
-  @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(100)
-  @IsString({ each: true })
-  reports!: string[];
-
+/** A full replacement of a report's content; `keep` leaves its link as it is. */
+export class UpdateReportDto extends ReportContentDto {
   @IsIn(['keep', 'none', 'url'])
   attachmentMode!: 'keep' | 'none' | 'url';
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(2048)
-  @MinLength(1)
-  attachmentUrl?: string;
 }

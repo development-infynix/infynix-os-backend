@@ -10,6 +10,5 @@ import { ReportsService } from './reports.service.js';
   imports: [TenancyModule, AccessModule],
   controllers: [ReportsController],
   providers: [ReportsRepository, ReportsService, ReportsPolicy],
-  exports: [ReportsRepository, ReportsService],
 })
 export class ReportsModule {}

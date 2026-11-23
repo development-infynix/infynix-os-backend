@@ -556,6 +556,7 @@ export const reports = pgTable.withRLS(
     index('reports_report_date_idx').on(t.reportDate),
     index('reports_created_by_idx').on(t.createdBy),
     index('reports_submitted_at_idx').on(t.submittedAt),
+    // The migration writes ON DELETE SET NULL ("created_by"): deleting a person keeps their reports.
     foreignKey({
       name: 'reports_created_by_fk',
       columns: [t.tenantId, t.createdBy],
@@ -581,12 +582,16 @@ export const reportSettings = pgTable.withRLS(
     tenantId: uuid('tenant_id')
       .primaryKey()
       .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
-    dueTime: time('due_time').default('21:00'),
+    /** IANA zone that "today", the due time and off days are read in. */
+    timezone: text().notNull().default('Asia/Kolkata'),
+    /** Reports submitted after this time on the day they cover are late; null = no due time. */
+    dueTime: time('due_time'),
     skipDays: smallint('skip_days').array().notNull().default([]),
     updatedBy: uuid('updated_by'),
     updatedAt: timestamptz('updated_at').notNull().defaultNow().$onUpdate(() => new Date()),
   },
   (t) => [
+    // The migration writes ON DELETE SET NULL ("updated_by").
     foreignKey({
       name: 'report_settings_updated_by_fk',
       columns: [t.tenantId, t.updatedBy],

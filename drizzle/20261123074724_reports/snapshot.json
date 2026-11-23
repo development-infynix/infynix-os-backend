@@ -1,0 +1,883 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "ffe0c19a-572e-489f-ac64-77f5a2828b8f",
+  "prevIds": [
+    "29d99bb2-f621-42de-94fe-ef3595a5469d"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "report_settings"
+      ],
+      "writes": [
+        "s|tbl|public.report_settings",
+        "n|tbl|public.report_settings",
+        "e|tbl|public.report_settings",
+        "n|rel|public.report_settings",
+        "n|type|public.report_settings",
+        "n|rel|public.report_settings_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "reports"
+      ],
+      "writes": [
+        "s|tbl|public.reports",
+        "n|tbl|public.reports",
+        "e|tbl|public.reports",
+        "n|rel|public.reports",
+        "n|type|public.reports",
+        "n|rel|public.reports_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "reports",
+        "reports_tenant_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.reports_tenant_id_idx",
+        "n|idx|public.reports_tenant_id_idx",
+        "e|idx|public.reports_tenant_id_idx",
+        "n|rel|public.reports_tenant_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "reports",
+        "reports_report_date_idx"
+      ],
+      "writes": [
+        "s|idx|public.reports_report_date_idx",
+        "n|idx|public.reports_report_date_idx",
+        "e|idx|public.reports_report_date_idx",
+        "n|rel|public.reports_report_date_idx"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.report_date"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "reports",
+        "reports_created_by_idx"
+      ],
+      "writes": [
+        "s|idx|public.reports_created_by_idx",
+        "n|idx|public.reports_created_by_idx",
+        "e|idx|public.reports_created_by_idx",
+        "n|rel|public.reports_created_by_idx"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.created_by"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "reports",
+        "reports_submitted_at_idx"
+      ],
+      "writes": [
+        "s|idx|public.reports_submitted_at_idx",
+        "n|idx|public.reports_submitted_at_idx",
+        "e|idx|public.reports_submitted_at_idx",
+        "n|rel|public.reports_submitted_at_idx"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.submitted_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "reports",
+        "reports_tenant_created_by_date_key"
+      ],
+      "writes": [
+        "s|idx|public.reports_tenant_created_by_date_key",
+        "n|idx|public.reports_tenant_created_by_date_key",
+        "e|idx|public.reports_tenant_created_by_date_key",
+        "n|rel|public.reports_tenant_created_by_date_key"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.tenant_id",
+        "n|col|public.reports.created_by",
+        "n|col|public.reports.report_date"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "report_settings"
+      ],
+      "writes": [
+        "s|fk|public.report_settings.report_settings_tenant_id_tenants_id_fkey",
+        "n|fk|public.report_settings.report_settings_tenant_id_tenants_id_fkey",
+        "e|fk|public.report_settings.report_settings_tenant_id_tenants_id_fkey",
+        "n|con|public.report_settings.report_settings_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.report_settings",
+        "n|sch|public",
+        "n|tbl|public.tenants",
+        "n|sch|public",
+        "n|col|public.report_settings.tenant_id",
+        "n|col|public.tenants.id",
+        "e|uniqueness|public.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "report_settings"
+      ],
+      "writes": [
+        "s|fk|public.report_settings.report_settings_updated_by_fk",
+        "n|fk|public.report_settings.report_settings_updated_by_fk",
+        "e|fk|public.report_settings.report_settings_updated_by_fk",
+        "n|con|public.report_settings.report_settings_updated_by_fk"
+      ],
+      "reads": [
+        "n|tbl|public.report_settings",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.report_settings.tenant_id",
+        "n|col|public.report_settings.updated_by",
+        "n|col|public.users.tenant_id",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "reports"
+      ],
+      "writes": [
+        "s|fk|public.reports.reports_tenant_id_tenants_id_fkey",
+        "n|fk|public.reports.reports_tenant_id_tenants_id_fkey",
+        "e|fk|public.reports.reports_tenant_id_tenants_id_fkey",
+        "n|con|public.reports.reports_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|tbl|public.tenants",
+        "n|sch|public",
+        "n|col|public.reports.tenant_id",
+        "n|col|public.tenants.id",
+        "e|uniqueness|public.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "reports"
+      ],
+      "writes": [
+        "s|fk|public.reports.reports_created_by_fk",
+        "n|fk|public.reports.reports_created_by_fk",
+        "e|fk|public.reports.reports_created_by_fk",
+        "n|con|public.reports.reports_created_by_fk"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.reports.tenant_id",
+        "n|col|public.reports.created_by",
+        "n|col|public.users.tenant_id",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "public",
+        "report_settings"
+      ],
+      "writes": [
+        "s|pol|public.report_settings.tenant_isolation",
+        "n|pol|public.report_settings.tenant_isolation",
+        "e|pol|public.report_settings.tenant_isolation"
+      ],
+      "reads": [
+        "n|tbl|public.report_settings",
+        "n|sch|public",
+        "n|role|infynix_tenant",
+        "e|rls|public.report_settings"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "public",
+        "reports"
+      ],
+      "writes": [
+        "s|pol|public.reports.tenant_isolation",
+        "n|pol|public.reports.tenant_isolation",
+        "e|pol|public.reports.tenant_isolation"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|role|infynix_tenant",
+        "e|rls|public.reports"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "report_settings",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "reports",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "timezone",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'Asia/Kolkata'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "due_time",
+        "type": "time",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "skip_days",
+        "type": "smallint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 1,
+        "default": "'{}'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "updated_by",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "report_date",
+        "type": "date",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "report_items",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "created_by",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "submitted_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "edited_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "attachment_type",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "attachment_url",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "remarks",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_tenant_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_report_date_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "report_date",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_created_by_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "created_by",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_submitted_at_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "submitted_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_tenant_created_by_date_key",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_by",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "report_date",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "report_settings_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "report_settings_updated_by_fk",
+        "nameExplicit": true,
+        "columns": [
+          "tenant_id",
+          "updated_by"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "tenant_id",
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_created_by_fk",
+        "nameExplicit": true,
+        "columns": [
+          "tenant_id",
+          "created_by"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "tenant_id",
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "report_settings_pkey",
+        "columns": [
+          "tenant_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_items_array",
+        "value": "jsonb_typeof(\"report_items\") = 'array'",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_attachment_type_valid",
+        "value": "\"attachment_type\" IS NULL OR \"attachment_type\" = 'url'",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_attachment_shape",
+        "value": "(\n        (\"attachment_type\" IS NULL AND \"attachment_url\" IS NULL)\n        OR (\"attachment_type\" = 'url' AND \"attachment_url\" IS NOT NULL)\n      )",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "report_settings",
+        "name": "tenant_isolation",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "infynix_tenant"
+        ],
+        "using": "\"report_settings\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "withCheck": "\"report_settings\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "tenant_isolation",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "infynix_tenant"
+        ],
+        "using": "\"reports\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "withCheck": "\"reports\".\"tenant_id\" = (nullif(current_setting('app.tenant_id', true), ''))::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

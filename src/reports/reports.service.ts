@@ -1,287 +1,369 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
-import { isUniqueViolation } from '../db/errors.js';
-import { TenantDb } from '../db/tenant-db.js';
-import type { Actor } from '../tenancy/tenancy.types.js';
-import { AccessService } from '../access/access.service.js';
-import { users } from '../db/schema.js';
 import {
-  type Report,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { isUniqueViolation } from '../db/errors.js';
+import { TenantDb, type TenantTx } from '../db/tenant-db.js';
+import type { Actor } from '../tenancy/tenancy.types.js';
+import {
   ReportsRepository,
+  type ReportsContext,
+  type ReportView,
 } from './reports.repository.js';
-import { CreateReportDto } from './dto/create-report.dto.js';
-import { UpdateReportDto } from './dto/update-report.dto.js';
-import { UpdateReportSettingsDto } from './dto/update-report-settings.dto.js';
+import type { CreateReportDto } from './dto/create-report.dto.js';
+import type { UpdateReportDto } from './dto/update-report.dto.js';
+import type { UpdateReportSettingsDto } from './dto/update-report-settings.dto.js';
 
-const EDIT_WINDOW_MS = 15 * 60 * 1000;
+/** How long an author may edit or delete their report after submitting it (database clock). */
+export const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
-function isElevated(role: string | undefined): boolean {
-  return role === 'owner';
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+/** Owners and managers see everyone's reports; staff see their own. */
+const seesAll = (actor: Actor) =>
+  actor.user.role === 'owner' || actor.user.role === 'manager';
+/** Only owners edit others' reports, add remarks and change settings. */
+const isOwner = (actor: Actor) => actor.user.role === 'owner';
+
+/**
+ * IANA names only ("Region/City" or UTC): Postgres reads abbreviations like
+ * "IST" as Israel time. Intl accepts aliases too (Node lists India as the old
+ * Asia/Calcutta; Asia/Kolkata must pass), and Postgres knows both spellings.
+ */
+function isTimezone(value: string): boolean {
+  if (value !== 'UTC' && !/^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+$/.test(value))
+    return false;
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function normalizeReportItems(items: unknown): string[] {
-  if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
-    throw new BadRequestException('Add between 1 and 100 report points.');
-  }
+/** Weekday of a plain `YYYY-MM-DD` date: 0 = Sunday … 6 = Saturday. */
+function weekdayOf(date: string): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+function isRealDate(date: string): boolean {
+  const [year, month, day] = date.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+function normalizeItems(items: string[]): string[] {
   return items.map((item) => {
-    if (typeof item !== 'string') throw new BadRequestException('Report points must be text.');
     const trimmed = item.trim();
     if (!trimmed || trimmed.length > 5000) {
-      throw new BadRequestException('Each report point must be between 1 and 5000 characters.');
+      throw new BadRequestException(
+        'Each work must be between 1 and 5000 characters.',
+      );
     }
     return trimmed;
   });
 }
 
-function normalizeUrl(value?: string): string {
-  if (!value?.trim()) throw new BadRequestException('Enter a URL.');
+function normalizeUrl(value: string | undefined): string {
+  if (!value?.trim()) throw new BadRequestException('Enter the link.');
   let url: URL;
   try {
     url = new URL(value.trim());
   } catch {
-    throw new BadRequestException('Enter a valid attachment URL.');
+    throw new BadRequestException(
+      'Enter a valid link, like https://example.com.',
+    );
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new BadRequestException('Attachment URLs must use HTTP or HTTPS.');
+    throw new BadRequestException('Links must start with http:// or https://.');
   }
   return url.toString();
 }
+
+/** A date a report may cover: real, not after today, not an off day (company timezone). */
+function assertDateAllowed(date: string, ctx: ReportsContext): void {
+  if (!isRealDate(date)) throw new BadRequestException('Choose a valid date.');
+  if (date > ctx.today)
+    throw new BadRequestException("Reports can't be dated in the future.");
+  const weekday = weekdayOf(date);
+  if (ctx.skipDays.includes(weekday)) {
+    throw new BadRequestException(
+      `${WEEKDAY_NAMES[weekday]} is an off day. Reports can't be dated on it.`,
+    );
+  }
+}
+
+const DUPLICATE = 'You already submitted a report for this date.';
 
 @Injectable()
 export class ReportsService {
   constructor(
     private readonly tenantDb: TenantDb,
     private readonly reports: ReportsRepository,
-    private readonly access: AccessService,
   ) {}
 
-  private async assertCanUseReports(actor: Actor): Promise<void> {
-    const user = actor.user;
-    if (!user.id || !['staff', 'manager', 'owner'].includes(user.role ?? '')) {
-      throw new ForbiddenException('You do not have permission to use Reports.');
-    }
-    if (isElevated(user.role)) return;
-    const keys = await this.access.keysFor(user);
-    if (!keys.includes('reports')) {
-      throw new ForbiddenException('You do not have access to the Reports menu.');
-    }
-  }
-
-  async health(actor: Actor) {
-    return this.tenantDb.run(actor.tenant.id, async () => ({ ok: true }));
-  }
-
-  async list(actor: Actor, page = 1, pageSize = 100, reportDate?: string, createdById?: string) {
-    await this.assertCanUseReports(actor);
-    const elevated = isElevated(actor.user.role);
-    const effectiveCreatedById = elevated ? createdById : actor.user.id;
+  async list(
+    actor: Actor,
+    opts: { page: number; pageSize: number; date?: string; userId?: string },
+  ) {
+    // Staff always see only their own; a userId they send is ignored.
+    const createdBy = seesAll(actor) ? opts.userId : actor.user.id;
     const { items, total } = await this.tenantDb.run(actor.tenant.id, (tx) =>
-      this.reports.page(tx, page, pageSize, reportDate, effectiveCreatedById),
+      this.reports.page(tx, {
+        page: opts.page,
+        pageSize: opts.pageSize,
+        reportDate: opts.date,
+        createdBy,
+      }),
     );
     return {
-      items: await Promise.all(items.map((row) => this.toResponse(row))),
+      items,
       total,
-      page,
-      pageSize,
-      totalPages: Math.ceil(total / pageSize) || 1,
-      date: reportDate ?? null,
-      userId: (elevated ? createdById : actor.user.id) ?? null,
+      page: opts.page,
+      pageSize: opts.pageSize,
+      totalPages: Math.max(1, Math.ceil(total / opts.pageSize)),
     };
   }
 
-  async findOne(id: string, actor: Actor) {
-    await this.assertCanUseReports(actor);
-    const row = await this.tenantDb.run(actor.tenant.id, (tx) => this.reports.find(tx, id));
-    if (!row) throw new NotFoundException(`Report ${id} not found.`);
-    const elevated = isElevated(actor.user.role);
-    if (!elevated && row.createdBy !== actor.user.id) {
-      throw new NotFoundException(`Report ${id} not found.`);
+  /** Per-day counts for a calendar range; staff only ever see their own. */
+  async calendar(
+    actor: Actor,
+    opts: { from: string; to: string; userId?: string },
+  ) {
+    if (!isRealDate(opts.from) || !isRealDate(opts.to) || opts.from > opts.to) {
+      throw new BadRequestException('Choose a valid date range.');
     }
-    return this.toResponse(row);
+    const days =
+      (Date.parse(`${opts.to}T00:00:00Z`) -
+        Date.parse(`${opts.from}T00:00:00Z`)) /
+      86_400_000;
+    if (days > 62)
+      throw new BadRequestException(
+        'A calendar range can cover at most 62 days.',
+      );
+    const createdBy = seesAll(actor) ? opts.userId : actor.user.id;
+    const items = await this.tenantDb.run(actor.tenant.id, (tx) =>
+      this.reports.daySummaries(tx, {
+        from: opts.from,
+        to: opts.to,
+        createdBy,
+        me: actor.user.id,
+      }),
+    );
+    return { items };
   }
 
-  async create(dto: CreateReportDto, actor: Actor) {
-    await this.assertCanUseReports(actor);
-    const reportItems = normalizeReportItems(dto.reports);
-    const reportDate = dto.reportDate;
-    let attachmentType: string | null = null;
-    let attachmentUrl: string | null = null;
-    if (dto.attachmentMode === 'url') {
-      attachmentType = 'url';
-      attachmentUrl = normalizeUrl(dto.attachmentUrl);
-    } else if (dto.attachmentMode === 'none') {
-      if (dto.attachmentUrl) throw new BadRequestException('Remove the unused attachment before submitting.');
-    }
+  async findOne(id: string, actor: Actor): Promise<ReportView> {
+    const report = await this.tenantDb.run(actor.tenant.id, (tx) =>
+      this.reports.find(tx, id),
+    );
+    return this.visible(report, id, actor);
+  }
 
+  async create(dto: CreateReportDto, actor: Actor): Promise<ReportView> {
+    const reportItems = normalizeItems(dto.reports);
+    const attachmentUrl =
+      dto.attachmentMode === 'url' ? normalizeUrl(dto.attachmentUrl) : null;
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      // off-day check
-      const settings = await this.reports.getSettings(tx, actor.tenant.id);
-      const weekday = new Date(reportDate + 'T00:00:00Z').getUTCDay();
-      if (settings?.skipDays?.includes(weekday)) {
-        const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        throw new BadRequestException(`${names[weekday]} is an off day. Reports can't be dated on it.`);
-      }
-      const existing = await this.reports.findExistingForDate(tx, actor.user.id, reportDate);
-      if (existing) throw new ConflictException('You already submitted a report for this date.');
-      let created: Report;
+      assertDateAllowed(
+        dto.reportDate,
+        await this.reports.context(tx, actor.user.id),
+      );
       try {
-        created = await this.reports.create(tx, {
-          tenantId: actor.tenant.id,
-          reportDate,
+        return await this.reports.create(tx, actor.tenant.id, actor.user.id, {
+          reportDate: dto.reportDate,
           reportItems,
-          createdBy: actor.user.id,
-          attachmentType,
           attachmentUrl,
         });
       } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException('You already submitted a report for this date.');
-        }
+        if (isUniqueViolation(error)) throw new ConflictException(DUPLICATE);
         throw error;
       }
-      const [creator] = await tx.select({ username: users.fullName }).from(users).where(eq(users.id, actor.user.id)).limit(1);
-      return this.toResponse({ ...created, createdByUsername: creator?.username ?? null });
     });
   }
 
-  async update(id: string, dto: UpdateReportDto, actor: Actor) {
-    await this.assertCanUseReports(actor);
-    const reportItems = normalizeReportItems(dto.reports);
-    const elevated = isElevated(actor.user.role);
-
+  async update(
+    id: string,
+    dto: UpdateReportDto,
+    actor: Actor,
+  ): Promise<ReportView> {
+    const reportItems = normalizeItems(dto.reports);
+    if (dto.attachmentMode !== 'url' && dto.attachmentUrl) {
+      throw new BadRequestException('Remove the unused link before saving.');
+    }
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const existing = await this.reports.find(tx, id);
-      if (!existing) throw new NotFoundException(`Report ${id} not found.`);
-      if (!elevated) {
-        if (existing.createdBy !== actor.user.id) throw new ForbiddenException('You can only edit your own reports.');
-        if (Date.now() - new Date(existing.submittedAt).getTime() > EDIT_WINDOW_MS) {
-          throw new ForbiddenException('This report can no longer be edited or deleted: it is past the 15-minute window after submission.');
-        }
-      }
+      const existing = this.assertCanChange(
+        await this.reports.find(tx, id),
+        id,
+        actor,
+        'edit',
+      );
+      // Date rules apply when the date moves; a report already on a new off day stays editable.
       if (dto.reportDate !== existing.reportDate) {
-        const settings = await this.reports.getSettings(tx, actor.tenant.id);
-        const weekday = new Date(dto.reportDate + 'T00:00:00Z').getUTCDay();
-        if (settings?.skipDays?.includes(weekday)) {
-          const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-          throw new BadRequestException(`${names[weekday]} is an off day. Reports can't be dated on it.`);
-        }
-        const dup = await this.reports.findExistingForDate(tx, existing.createdBy!, dto.reportDate);
-        if (dup && dup.id !== id) throw new ConflictException('You already submitted a report for this date.');
+        assertDateAllowed(
+          dto.reportDate,
+          await this.reports.context(tx, actor.user.id),
+        );
       }
-
-      let attachmentType: string | null = existing.attachmentType;
-      let attachmentUrl: string | null = existing.attachmentUrl;
-      if (dto.attachmentMode === 'none') {
-        attachmentType = null;
-        attachmentUrl = null;
-        if (dto.attachmentUrl) throw new BadRequestException('Remove the unused attachment before submitting.');
-      } else if (dto.attachmentMode === 'url') {
-        attachmentType = 'url';
-        attachmentUrl = normalizeUrl(dto.attachmentUrl);
-      } else if (dto.attachmentMode === 'keep') {
-        if (dto.attachmentUrl) throw new BadRequestException('Remove the unused attachment before keeping the current one.');
-      }
-
-      const contentChanged =
+      const attachmentUrl =
+        dto.attachmentMode === 'keep'
+          ? (existing.attachment?.url ?? null)
+          : dto.attachmentMode === 'url'
+            ? normalizeUrl(dto.attachmentUrl)
+            : null;
+      const edited =
         dto.reportDate !== existing.reportDate ||
-        JSON.stringify(reportItems) !== JSON.stringify(existing.reportItems) ||
-        attachmentType !== existing.attachmentType ||
-        attachmentUrl !== existing.attachmentUrl;
-
-      const updated = await this.reports.update(tx, id, {
-        reportDate: dto.reportDate,
-        reportItems,
-        attachmentType,
-        attachmentUrl,
-      });
-      if (!updated) throw new NotFoundException(`Report ${id} not found.`);
-      if (contentChanged) {
-        await this.reports.setEditedAt(tx, id, new Date());
-        updated.editedAt = new Date();
-      } else {
-        updated.editedAt = existing.editedAt;
+        JSON.stringify(reportItems) !== JSON.stringify(existing.reports) ||
+        attachmentUrl !== (existing.attachment?.url ?? null);
+      try {
+        const updated = await this.reports.update(
+          tx,
+          id,
+          { reportDate: dto.reportDate, reportItems, attachmentUrl },
+          edited,
+        );
+        if (!updated) throw new NotFoundException(`Report ${id} not found.`);
+        return updated;
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new ConflictException(DUPLICATE);
+        throw error;
       }
-      const [creator] = updated.createdBy
-        ? await tx.select({ username: users.fullName }).from(users).where(eq(users.id, updated.createdBy)).limit(1)
-        : [];
-      return this.toResponse({ ...updated, createdByUsername: creator?.username ?? null });
     });
   }
 
-  async updateRemarks(id: string, remarks: string | null | undefined, actor: Actor) {
-    await this.assertCanUseReports(actor);
-    if (!isElevated(actor.user.role)) throw new ForbiddenException('Only owner can add remarks.');
-    return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const existing = await this.reports.find(tx, id);
-      if (!existing) throw new NotFoundException(`Report ${id} not found.`);
-      const next = remarks?.trim() || null;
-      const updated = await this.reports.updateRemarks(tx, id, next);
-      if (!updated) throw new NotFoundException(`Report ${id} not found.`);
-      const [creator] = updated.createdBy
-        ? await tx.select({ username: users.fullName }).from(users).where(eq(users.id, updated.createdBy)).limit(1)
-        : [];
-      return this.toResponse({ ...updated, createdByUsername: creator?.username ?? null });
+  async updateRemarks(
+    id: string,
+    remarks: string | null | undefined,
+    actor: Actor,
+  ): Promise<ReportView> {
+    if (!isOwner(actor))
+      throw new ForbiddenException('Only the owner can add remarks.');
+    const next = remarks?.trim() || null;
+    const updated = await this.tenantDb.run(actor.tenant.id, (tx) =>
+      this.reports.updateRemarks(tx, id, next),
+    );
+    if (!updated) throw new NotFoundException(`Report ${id} not found.`);
+    return updated;
+  }
+
+  async remove(id: string, actor: Actor): Promise<void> {
+    await this.tenantDb.run(actor.tenant.id, async (tx) => {
+      const guard = isOwner(actor)
+        ? null
+        : { userId: actor.user.id, windowMs: EDIT_WINDOW_MS };
+      if (await this.reports.remove(tx, id, guard)) return;
+      // Nothing deleted: look the report up only now, to say why.
+      this.assertCanChange(
+        await this.reports.find(tx, id),
+        id,
+        actor,
+        'delete',
+      );
+      throw new ForbiddenException(this.windowMessage());
     });
   }
 
   async getSettings(actor: Actor) {
-    await this.assertCanUseReports(actor);
-    return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const row = await this.reports.getSettings(tx, actor.tenant.id);
-      return {
-        dueTime: row?.dueTime ? String(row.dueTime).slice(0, 5) : null,
-        skipDays: row?.skipDays ?? [],
-        timezone: 'UTC',
-        updatedAt: row?.updatedAt ?? null,
-      };
-    });
+    return this.tenantDb.run(actor.tenant.id, (tx) =>
+      this.settingsResponse(tx, actor),
+    );
   }
 
   async updateSettings(dto: UpdateReportSettingsDto, actor: Actor) {
-    await this.assertCanUseReports(actor);
-    if (!isElevated(actor.user.role)) throw new ForbiddenException('Only owner can change Reports settings.');
+    if (!isOwner(actor))
+      throw new ForbiddenException(
+        'Only the owner can change Reports settings.',
+      );
+    if (!isTimezone(dto.timezone)) {
+      throw new BadRequestException(
+        'Choose a timezone from the list, like Asia/Kolkata.',
+      );
+    }
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const row = await this.reports.upsertSettings(tx, actor.tenant.id, dto.dueTime, dto.skipDays, actor.user.id);
-      return {
-        dueTime: row.dueTime ? String(row.dueTime).slice(0, 5) : null,
-        skipDays: row.skipDays,
-        timezone: 'UTC',
-        updatedAt: row.updatedAt,
-      };
+      await this.reports.upsertSettings(
+        tx,
+        actor.tenant.id,
+        {
+          timezone: dto.timezone,
+          dueTime: dto.dueTime,
+          skipDays: [...dto.skipDays].sort((a, b) => a - b),
+        },
+        actor.user.id,
+      );
+      return this.settingsResponse(tx, actor);
     });
   }
 
-  async remove(id: string, actor: Actor) {
-    await this.assertCanUseReports(actor);
-    const elevated = isElevated(actor.user.role);
-    return this.tenantDb.run(actor.tenant.id, async (tx) => {
-      const existing = await this.reports.find(tx, id);
-      if (!existing) throw new NotFoundException(`Report ${id} not found.`);
-      if (!elevated) {
-        if (existing.createdBy !== actor.user.id) throw new ForbiddenException('You can only delete your own reports.');
-        if (Date.now() - new Date(existing.submittedAt).getTime() > EDIT_WINDOW_MS) {
-          throw new ForbiddenException('This report can no longer be edited or deleted: it is past the 15-minute window after submission.');
-        }
-      }
-      await this.reports.remove(tx, id);
-      return { id };
-    });
+  /** People for the person filter: owners and managers only. */
+  async people(
+    actor: Actor,
+    opts: { query: string; limit: number; selected?: string },
+  ) {
+    if (!seesAll(actor))
+      throw new ForbiddenException(
+        'Only owners and managers can filter by person.',
+      );
+    const items = await this.tenantDb.run(actor.tenant.id, (tx) =>
+      this.reports.people(tx, opts),
+    );
+    return { items };
   }
 
-  private async toResponse(row: Report & { createdByUsername: string | null }) {
+  private async settingsResponse(tx: TenantTx, actor: Actor) {
+    const ctx = await this.reports.context(tx, actor.user.id);
     return {
-      id: row.id,
-      reportDate: row.reportDate,
-      reports: row.reportItems,
-      createdBy: row.createdBy,
-      createdByUsername: row.createdByUsername,
-      submittedAt: row.submittedAt,
-      updatedAt: row.updatedAt,
-      editedAt: row.editedAt,
-      attachment: row.attachmentType === 'url' && row.attachmentUrl
-        ? { type: 'url', url: row.attachmentUrl }
-        : null,
-      remarks: row.remarks,
+      ...ctx,
+      todayIsOffDay: ctx.skipDays.includes(weekdayOf(ctx.today)),
+      editWindowMinutes: EDIT_WINDOW_MS / 60_000,
     };
+  }
+
+  /** Staff can't tell someone else's report from a missing one. */
+  private visible(
+    report: ReportView | null,
+    id: string,
+    actor: Actor,
+  ): ReportView {
+    if (!report || (!seesAll(actor) && report.createdBy !== actor.user.id)) {
+      throw new NotFoundException(`Report ${id} not found.`);
+    }
+    return report;
+  }
+
+  /** 404 when hidden or missing; 403 for someone else's report or past the window. */
+  private assertCanChange(
+    report: ReportView | null,
+    id: string,
+    actor: Actor,
+    verb: 'edit' | 'delete',
+  ): ReportView {
+    const found = this.visible(report, id, actor);
+    if (isOwner(actor)) return found;
+    if (found.createdBy !== actor.user.id)
+      throw new ForbiddenException(`You can only ${verb} your own reports.`);
+    if (Date.now() - new Date(found.submittedAt).getTime() > EDIT_WINDOW_MS) {
+      throw new ForbiddenException(this.windowMessage());
+    }
+    return found;
+  }
+
+  private windowMessage(): string {
+    return `This report can no longer be changed: reports can be edited or deleted for ${EDIT_WINDOW_MS / 60_000} minutes after submitting.`;
   }
 }

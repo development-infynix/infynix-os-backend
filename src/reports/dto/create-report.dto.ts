@@ -1,32 +1,34 @@
-import { Transform } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 
-const parseReportItems = ({ value }: { value: unknown }) => {
-  if (typeof value !== 'string') return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-};
-
-export class CreateReportDto {
-  @IsDateString()
+/** Fields shared by a new report and an edit. Points are trimmed and checked again in the service. */
+export abstract class ReportContentDto {
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'Report date must use the YYYY-MM-DD format.',
+  })
   reportDate!: string;
 
-  @Transform(parseReportItems)
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(100)
+  @ArrayMinSize(1, { message: 'Add at least one work.' })
+  @ArrayMaxSize(100, { message: 'A report can have at most 100 works.' })
   @IsString({ each: true })
   reports!: string[];
 
-  @IsIn(['none', 'url'])
-  attachmentMode!: 'none' | 'url';
-
   @IsOptional()
   @IsString()
-  @MaxLength(2048)
-  @MinLength(1)
+  @MaxLength(2048, { message: 'The link must be at most 2048 characters.' })
   attachmentUrl?: string;
+}
+
+export class CreateReportDto extends ReportContentDto {
+  @IsIn(['none', 'url'])
+  attachmentMode!: 'none' | 'url';
 }
