@@ -3,6 +3,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -12,7 +13,9 @@ import {
   pgRole,
   pgTable,
   primaryKey,
+  smallint,
   text,
+  time,
   timestamp,
   uniqueIndex,
   uuid,
@@ -528,3 +531,70 @@ export const crmPipelineUsers = pgTable.withRLS(
 export type CrmPipelineRow = typeof crmPipelines.$inferSelect;
 export type CrmPipelineStageRow = typeof crmPipelineStages.$inferSelect;
 export type CrmDealRow = typeof crmDeals.$inferSelect;
+
+/* ── Reports ─────────────────────────────────────────────────────────────── */
+
+export const reports = pgTable.withRLS(
+  'reports',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    reportDate: date('report_date', { mode: 'string' }).notNull(),
+    reportItems: jsonb('report_items').$type<string[]>().notNull().default([]),
+    createdBy: uuid('created_by'),
+    submittedAt: timestamptz('submitted_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at').notNull().defaultNow().$onUpdate(() => new Date()),
+    editedAt: timestamptz('edited_at'),
+    attachmentType: text('attachment_type'),
+    attachmentUrl: text('attachment_url'),
+    remarks: text('remarks'),
+  },
+  (t) => [
+    index('reports_tenant_id_idx').on(t.tenantId),
+    index('reports_report_date_idx').on(t.reportDate),
+    index('reports_created_by_idx').on(t.createdBy),
+    index('reports_submitted_at_idx').on(t.submittedAt),
+    foreignKey({
+      name: 'reports_created_by_fk',
+      columns: [t.tenantId, t.createdBy],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('set null'),
+    uniqueIndex('reports_tenant_created_by_date_key').on(t.tenantId, t.createdBy, t.reportDate),
+    check('reports_items_array', sql`jsonb_typeof(${t.reportItems}) = 'array'`),
+    check('reports_attachment_type_valid', sql`${t.attachmentType} IS NULL OR ${t.attachmentType} = 'url'`),
+    check(
+      'reports_attachment_shape',
+      sql`(
+        (${t.attachmentType} IS NULL AND ${t.attachmentUrl} IS NULL)
+        OR (${t.attachmentType} = 'url' AND ${t.attachmentUrl} IS NOT NULL)
+      )`,
+    ),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+export const reportSettings = pgTable.withRLS(
+  'report_settings',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    dueTime: time('due_time').default('21:00'),
+    skipDays: smallint('skip_days').array().notNull().default([]),
+    updatedBy: uuid('updated_by'),
+    updatedAt: timestamptz('updated_at').notNull().defaultNow().$onUpdate(() => new Date()),
+  },
+  (t) => [
+    foreignKey({
+      name: 'report_settings_updated_by_fk',
+      columns: [t.tenantId, t.updatedBy],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('set null'),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+export type ReportRow = typeof reports.$inferSelect;
+export type ReportSettingsRow = typeof reportSettings.$inferSelect;

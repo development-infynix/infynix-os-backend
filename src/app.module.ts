@@ -15,6 +15,7 @@ import { allowedOrigins } from './config/origins.js';
 import { pgPoolConfig } from './db/pg-config.js';
 import { HealthController } from './health/health.controller.js';
 import { MembersModule } from './members/members.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { ActorResolver } from './tenancy/actor.resolver.js';
 import { TenancyModule } from './tenancy/tenancy.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -54,6 +55,7 @@ import { UsersModule } from './users/users.module.js';
     TenancyModule,
     AccessModule,
     MembersModule,
+    ReportsModule,
     ClientsModule,
     CrmModule,
     AuthModule,
