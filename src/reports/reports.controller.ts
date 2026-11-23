@@ -10,7 +10,16 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-fastify/multipart';
+import type { StoredUpload } from '@nestjs/storage';
+import {
+  MAX_REPORT_FILE_BYTES,
+  cleanFileName,
+  reportFileStorage,
+} from './report-files.js';
 import { Can } from '@nestjs/authorization';
 import { CurrentActor } from '../tenancy/actor.resolver.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
@@ -21,7 +30,7 @@ import { UpdateReportDto } from './dto/update-report.dto.js';
 import { UpdateReportRemarksDto } from './dto/update-report-remarks.dto.js';
 import { UpdateReportSettingsDto } from './dto/update-report-settings.dto.js';
 
-const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 100;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function positiveInt(
@@ -120,6 +129,30 @@ export class ReportsController {
       limit: positiveInt(limit, 20, 50, 'Limit'),
       selected: selected || undefined,
     });
+  }
+
+  /**
+   * Uploads one file (multipart field `file`, at most 10 MB; PDF, images,
+   * Office files, CSV or text) into the caller's own folder. Returns the key
+   * to send as `fileKey` when creating or editing a report. 413 when too
+   * large, 415 for other types.
+   */
+  @Post('files')
+  @Can(ReportsPolicy, 'use')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: reportFileStorage,
+      limits: { fileSize: MAX_REPORT_FILE_BYTES, files: 1 },
+    }),
+  )
+  uploadFile(@UploadedFile() file: StoredUpload | undefined) {
+    if (!file) throw new BadRequestException('Choose a file to upload.');
+    return {
+      key: file.key,
+      name: cleanFileName(file.originalname),
+      size: file.size,
+      contentType: file.contentType,
+    };
   }
 
   @Get(':id')

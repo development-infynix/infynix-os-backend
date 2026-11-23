@@ -1,11 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import {
-  AuthenticationModule,
-  type Duration,
-} from '@nestjs/authentication';
+import { AuthenticationModule, type Duration } from '@nestjs/authentication';
 import { AuthorizationModule } from '@nestjs/authorization';
 import { DrizzleModule } from '@nestjs/drizzle';
+import { StorageModule } from '@nestjs/storage';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { AccessModule } from './access/access.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -16,6 +14,7 @@ import { pgPoolConfig } from './db/pg-config.js';
 import { HealthController } from './health/health.controller.js';
 import { MembersModule } from './members/members.module.js';
 import { ReportsModule } from './reports/reports.module.js';
+import { storageOptions } from './storage/storage.options.js';
 import { ActorResolver } from './tenancy/actor.resolver.js';
 import { TenancyModule } from './tenancy/tenancy.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -25,6 +24,11 @@ import { UsersModule } from './users/users.module.js';
     ConfigModule.forRoot({ isGlobal: true, cache: true }),
     DrizzleModule.forRootAsync({
       useFactory: () => ({ drizzle, connection: pgPoolConfig() }),
+    }),
+    // Uploaded files (S3-compatible bucket); see storage/storage.options.ts.
+    StorageModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => storageOptions(config),
     }),
     // Authentication before authorization: the policy guard reads request.user.
     AuthenticationModule.forRootAsync({

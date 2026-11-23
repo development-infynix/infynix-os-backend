@@ -5,7 +5,21 @@ import type { TenantTx } from '../db/tenant-db.js';
 /** The company's zone when it hasn't saved Reports settings yet. */
 export const DEFAULT_REPORTS_TIMEZONE = 'Asia/Kolkata';
 
-/** A report as the API returns it. Timestamps are ISO strings. */
+/**
+ * What a report carries besides its works: a link, or an uploaded file (its
+ * storage key stays on the server; the service swaps it for a signed link).
+ */
+export type ReportAttachment =
+  | { type: 'url'; url: string }
+  | {
+      type: 'file';
+      key: string;
+      name: string;
+      size: number;
+      contentType: string;
+    };
+
+/** A report as the repository reads it. Timestamps are ISO strings. */
 export interface ReportView {
   id: string;
   reportDate: string;
@@ -15,7 +29,7 @@ export interface ReportView {
   submittedAt: string;
   updatedAt: string;
   editedAt: string | null;
-  attachment: { type: 'url'; url: string } | null;
+  attachment: ReportAttachment | null;
   remarks: string | null;
   /** Submitted after the due time on the day it covers (company timezone). */
   late: boolean;
@@ -36,7 +50,7 @@ export interface ReportsContext {
 export interface ReportContent {
   reportDate: string;
   reportItems: string[];
-  attachmentUrl: string | null;
+  attachment: ReportAttachment | null;
 }
 
 /** One day of the month view: how many reports were filed, and how many late. */
@@ -55,7 +69,12 @@ export interface ReportPerson {
 }
 
 interface ReportRow extends Omit<ReportView, 'attachment'> {
+  attachmentType: 'url' | 'file' | null;
   attachmentUrl: string | null;
+  attachmentKey: string | null;
+  attachmentName: string | null;
+  attachmentSize: number | null;
+  attachmentContentType: string | null;
 }
 
 const iso = (column: SQL) => sql`(to_json(${column}) #>> '{}')`;
@@ -82,7 +101,12 @@ const reportColumns = sql`
   ${iso(sql`r.submitted_at`)} as "submittedAt",
   ${iso(sql`r.updated_at`)} as "updatedAt",
   ${iso(sql`r.edited_at`)} as "editedAt",
+  r.attachment_type as "attachmentType",
   r.attachment_url as "attachmentUrl",
+  r.attachment_key as "attachmentKey",
+  r.attachment_name as "attachmentName",
+  r.attachment_size as "attachmentSize",
+  r.attachment_content_type as "attachmentContentType",
   r.remarks,
   ${lateExpr} as late`;
 
@@ -90,10 +114,39 @@ const reportJoins = sql`
   left join users u on u.id = r.created_by
   left join report_settings s on s.tenant_id = r.tenant_id`;
 
-function toView({ attachmentUrl, ...row }: ReportRow): ReportView {
+function toView({
+  attachmentType,
+  attachmentUrl,
+  attachmentKey,
+  attachmentName,
+  attachmentSize,
+  attachmentContentType,
+  ...row
+}: ReportRow): ReportView {
+  const attachment: ReportAttachment | null =
+    attachmentType === 'url' && attachmentUrl
+      ? { type: 'url', url: attachmentUrl }
+      : attachmentType === 'file' && attachmentKey
+        ? {
+            type: 'file',
+            key: attachmentKey,
+            name: attachmentName ?? 'file',
+            size: Number(attachmentSize ?? 0),
+            contentType: attachmentContentType ?? 'application/octet-stream',
+          }
+        : null;
+  return { ...row, attachment };
+}
+
+/** The six attachment columns for a link, a file, or nothing. */
+function attachmentValues(a: ReportAttachment | null) {
   return {
-    ...row,
-    attachment: attachmentUrl ? { type: 'url', url: attachmentUrl } : null,
+    type: a?.type ?? null,
+    url: a?.type === 'url' ? a.url : null,
+    key: a?.type === 'file' ? a.key : null,
+    name: a?.type === 'file' ? a.name : null,
+    size: a?.type === 'file' ? a.size : null,
+    contentType: a?.type === 'file' ? a.contentType : null,
   };
 }
 
@@ -196,16 +249,22 @@ export class ReportsRepository {
     createdBy: string,
     content: ReportContent,
   ): Promise<ReportView> {
+    const a = attachmentValues(content.attachment);
     const result = await tx.execute<ReportRow>(sql`
       with r as (
-        insert into reports (tenant_id, report_date, report_items, created_by, attachment_type, attachment_url)
+        insert into reports (tenant_id, report_date, report_items, created_by, attachment_type, attachment_url,
+                             attachment_key, attachment_name, attachment_size, attachment_content_type)
         values (
           ${tenantId}::uuid,
           ${content.reportDate}::date,
           ${JSON.stringify(content.reportItems)}::jsonb,
           ${createdBy}::uuid,
-          ${content.attachmentUrl ? 'url' : null},
-          ${content.attachmentUrl}
+          ${a.type},
+          ${a.url},
+          ${a.key},
+          ${a.name},
+          ${a.size}::int,
+          ${a.contentType}
         )
         returning *
       )
@@ -220,13 +279,18 @@ export class ReportsRepository {
     content: ReportContent,
     edited: boolean,
   ): Promise<ReportView | null> {
+    const a = attachmentValues(content.attachment);
     const result = await tx.execute<ReportRow>(sql`
       with r as (
         update reports
            set report_date = ${content.reportDate}::date,
                report_items = ${JSON.stringify(content.reportItems)}::jsonb,
-               attachment_type = ${content.attachmentUrl ? 'url' : null},
-               attachment_url = ${content.attachmentUrl},
+               attachment_type = ${a.type},
+               attachment_url = ${a.url},
+               attachment_key = ${a.key},
+               attachment_name = ${a.name},
+               attachment_size = ${a.size}::int,
+               attachment_content_type = ${a.contentType},
                updated_at = now(),
                edited_at = case when ${edited} then now() else edited_at end
          where id = ${id}::uuid
@@ -254,20 +318,21 @@ export class ReportsRepository {
   /**
    * Deletes the report when `onlyIfAuthorWithin` allows it: null deletes any
    * report; otherwise only that author's, while `submitted_at` is newer than
-   * the window. Returns whether a row was deleted.
+   * the window. Returns the deleted report's file key (to remove from storage),
+   * or null when nothing was deleted.
    */
   async remove(
     tx: TenantTx,
     id: string,
     onlyIfAuthorWithin: { userId: string; windowMs: number } | null,
-  ): Promise<boolean> {
+  ): Promise<{ fileKey: string | null } | null> {
     const guard = onlyIfAuthorWithin
       ? sql`and created_by = ${onlyIfAuthorWithin.userId}::uuid
             and submitted_at > now() - make_interval(secs => ${onlyIfAuthorWithin.windowMs / 1000})`
       : sql``;
-    const result = await tx.execute<{ id: string }>(sql`
-      delete from reports where id = ${id}::uuid ${guard} returning id`);
-    return result.rows.length > 0;
+    const result = await tx.execute<{ fileKey: string | null }>(sql`
+      delete from reports where id = ${id}::uuid ${guard} returning attachment_key as "fileKey"`);
+    return result.rows[0] ?? null;
   }
 
   async upsertSettings(

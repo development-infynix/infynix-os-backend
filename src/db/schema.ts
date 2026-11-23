@@ -549,6 +549,11 @@ export const reports = pgTable.withRLS(
     editedAt: timestamptz('edited_at'),
     attachmentType: text('attachment_type'),
     attachmentUrl: text('attachment_url'),
+    /** An uploaded file: its key in the storage bucket, original name, size and stored type. */
+    attachmentKey: text('attachment_key'),
+    attachmentName: text('attachment_name'),
+    attachmentSize: integer('attachment_size'),
+    attachmentContentType: text('attachment_content_type'),
     remarks: text('remarks'),
   },
   (t) => [
@@ -564,14 +569,23 @@ export const reports = pgTable.withRLS(
     }).onDelete('set null'),
     uniqueIndex('reports_tenant_created_by_date_key').on(t.tenantId, t.createdBy, t.reportDate),
     check('reports_items_array', sql`jsonb_typeof(${t.reportItems}) = 'array'`),
-    check('reports_attachment_type_valid', sql`${t.attachmentType} IS NULL OR ${t.attachmentType} = 'url'`),
+    check(
+      'reports_attachment_type_valid',
+      sql`${t.attachmentType} IS NULL OR ${t.attachmentType} IN ('url', 'file')`,
+    ),
+    // Exactly one shape: nothing, a link, or a stored file (never a mix).
     check(
       'reports_attachment_shape',
       sql`(
-        (${t.attachmentType} IS NULL AND ${t.attachmentUrl} IS NULL)
-        OR (${t.attachmentType} = 'url' AND ${t.attachmentUrl} IS NOT NULL)
+        (${t.attachmentType} IS NULL AND ${t.attachmentUrl} IS NULL AND ${t.attachmentKey} IS NULL)
+        OR (${t.attachmentType} = 'url' AND ${t.attachmentUrl} IS NOT NULL AND ${t.attachmentKey} IS NULL)
+        OR (${t.attachmentType} = 'file' AND ${t.attachmentUrl} IS NULL AND ${t.attachmentKey} IS NOT NULL
+            AND ${t.attachmentName} IS NOT NULL AND ${t.attachmentSize} IS NOT NULL
+            AND ${t.attachmentContentType} IS NOT NULL)
       )`,
     ),
+    // One file belongs to one report.
+    uniqueIndex('reports_attachment_key_key').on(t.attachmentKey),
     tenantIsolation(t.tenantId),
   ],
 );

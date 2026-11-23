@@ -26,9 +26,21 @@ export abstract class ReportContentDto {
   @IsString()
   @MaxLength(2048, { message: 'The link must be at most 2048 characters.' })
   attachmentUrl?: string;
+
+  /** With `attachmentMode: 'file'`: the key `POST /reports/files` returned. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  fileKey?: string;
+
+  /** The file's original name, shown and used when it's downloaded. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  fileName?: string;
 }
 
 export class CreateReportDto extends ReportContentDto {
-  @IsIn(['none', 'url'])
-  attachmentMode!: 'none' | 'url';
+  @IsIn(['none', 'url', 'file'])
+  attachmentMode!: 'none' | 'url' | 'file';
 }

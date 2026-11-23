@@ -3,13 +3,22 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  InjectDisk,
+  StorageDisk,
+  StorageFileNotFoundError,
+} from '@nestjs/storage';
+import { FILES_DISK } from '../storage/storage.options.js';
+import { cleanFileName, reportFilesPrefix } from './report-files.js';
 import { isUniqueViolation } from '../db/errors.js';
 import { TenantDb, type TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import {
   ReportsRepository,
+  type ReportAttachment,
   type ReportsContext,
   type ReportView,
 } from './reports.repository.js';
@@ -111,11 +120,45 @@ function assertDateAllowed(date: string, ctx: ReportsContext): void {
 
 const DUPLICATE = 'You already submitted a report for this date.';
 
+/** Compares attachments by what they point at. */
+function attachmentIdentity(a: ReportAttachment | null): string {
+  if (!a) return '';
+  return a.type === 'url' ? `url:${a.url}` : `file:${a.key}`;
+}
+
+/** How long a file's download link works. */
+const FILE_LINK_TTL = '15m';
+
+/** A report as the API returns it: a file's storage key becomes a signed download link. */
+export type PublicReport = Omit<ReportView, 'attachment'> & {
+  attachment:
+    | { type: 'url'; url: string }
+    | {
+        type: 'file';
+        name: string;
+        size: number;
+        contentType: string;
+        url: string;
+      }
+    | null;
+};
+
+/** What a new report or an edit asks to attach. */
+interface AttachmentRequest {
+  attachmentMode: 'keep' | 'none' | 'url' | 'file';
+  attachmentUrl?: string;
+  fileKey?: string;
+  fileName?: string;
+}
+
 @Injectable()
 export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+
   constructor(
     private readonly tenantDb: TenantDb,
     private readonly reports: ReportsRepository,
+    @InjectDisk(FILES_DISK) private readonly files: StorageDisk,
   ) {}
 
   async list(
@@ -133,7 +176,7 @@ export class ReportsService {
       }),
     );
     return {
-      items,
+      items: await Promise.all(items.map((item) => this.toPublic(item))),
       total,
       page: opts.page,
       pageSize: opts.pageSize,
@@ -169,18 +212,18 @@ export class ReportsService {
     return { items };
   }
 
-  async findOne(id: string, actor: Actor): Promise<ReportView> {
+  async findOne(id: string, actor: Actor): Promise<PublicReport> {
     const report = await this.tenantDb.run(actor.tenant.id, (tx) =>
       this.reports.find(tx, id),
     );
-    return this.visible(report, id, actor);
+    return this.toPublic(this.visible(report, id, actor));
   }
 
-  async create(dto: CreateReportDto, actor: Actor): Promise<ReportView> {
+  async create(dto: CreateReportDto, actor: Actor): Promise<PublicReport> {
     const reportItems = normalizeItems(dto.reports);
-    const attachmentUrl =
-      dto.attachmentMode === 'url' ? normalizeUrl(dto.attachmentUrl) : null;
-    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+    // Checked against storage before the transaction, so no connection waits on it.
+    const attachment = await this.requestedAttachment(dto, actor, null);
+    const created = await this.tenantDb.run(actor.tenant.id, async (tx) => {
       assertDateAllowed(
         dto.reportDate,
         await this.reports.context(tx, actor.user.id),
@@ -189,25 +232,32 @@ export class ReportsService {
         return await this.reports.create(tx, actor.tenant.id, actor.user.id, {
           reportDate: dto.reportDate,
           reportItems,
-          attachmentUrl,
+          attachment,
         });
       } catch (error) {
         if (isUniqueViolation(error)) throw new ConflictException(DUPLICATE);
         throw error;
       }
     });
+    return this.toPublic(created);
   }
 
   async update(
     id: string,
     dto: UpdateReportDto,
     actor: Actor,
-  ): Promise<ReportView> {
+  ): Promise<PublicReport> {
     const reportItems = normalizeItems(dto.reports);
     if (dto.attachmentMode !== 'url' && dto.attachmentUrl) {
       throw new BadRequestException('Remove the unused link before saving.');
     }
-    return this.tenantDb.run(actor.tenant.id, async (tx) => {
+    // A new file is checked against storage before the transaction.
+    const requested =
+      dto.attachmentMode === 'keep'
+        ? undefined
+        : await this.requestedAttachment(dto, actor, id);
+    let replacedFileKey: string | null = null;
+    const updated = await this.tenantDb.run(actor.tenant.id, async (tx) => {
       const existing = this.assertCanChange(
         await this.reports.find(tx, id),
         id,
@@ -221,37 +271,41 @@ export class ReportsService {
           await this.reports.context(tx, actor.user.id),
         );
       }
-      const attachmentUrl =
-        dto.attachmentMode === 'keep'
-          ? (existing.attachment?.url ?? null)
-          : dto.attachmentMode === 'url'
-            ? normalizeUrl(dto.attachmentUrl)
-            : null;
+      const attachment =
+        requested === undefined ? existing.attachment : requested;
+      const before = attachmentIdentity(existing.attachment);
+      const after = attachmentIdentity(attachment);
       const edited =
         dto.reportDate !== existing.reportDate ||
         JSON.stringify(reportItems) !== JSON.stringify(existing.reports) ||
-        attachmentUrl !== (existing.attachment?.url ?? null);
+        before !== after;
       try {
-        const updated = await this.reports.update(
+        const row = await this.reports.update(
           tx,
           id,
-          { reportDate: dto.reportDate, reportItems, attachmentUrl },
+          { reportDate: dto.reportDate, reportItems, attachment },
           edited,
         );
-        if (!updated) throw new NotFoundException(`Report ${id} not found.`);
-        return updated;
+        if (!row) throw new NotFoundException(`Report ${id} not found.`);
+        if (existing.attachment?.type === 'file' && before !== after) {
+          replacedFileKey = existing.attachment.key;
+        }
+        return row;
       } catch (error) {
         if (isUniqueViolation(error)) throw new ConflictException(DUPLICATE);
         throw error;
       }
     });
+    // The old file goes only once the report no longer points at it.
+    if (replacedFileKey) this.deleteStoredFile(replacedFileKey);
+    return this.toPublic(updated);
   }
 
   async updateRemarks(
     id: string,
     remarks: string | null | undefined,
     actor: Actor,
-  ): Promise<ReportView> {
+  ): Promise<PublicReport> {
     if (!isOwner(actor))
       throw new ForbiddenException('Only the owner can add remarks.');
     const next = remarks?.trim() || null;
@@ -259,15 +313,16 @@ export class ReportsService {
       this.reports.updateRemarks(tx, id, next),
     );
     if (!updated) throw new NotFoundException(`Report ${id} not found.`);
-    return updated;
+    return this.toPublic(updated);
   }
 
   async remove(id: string, actor: Actor): Promise<void> {
-    await this.tenantDb.run(actor.tenant.id, async (tx) => {
+    const removed = await this.tenantDb.run(actor.tenant.id, async (tx) => {
       const guard = isOwner(actor)
         ? null
         : { userId: actor.user.id, windowMs: EDIT_WINDOW_MS };
-      if (await this.reports.remove(tx, id, guard)) return;
+      const deleted = await this.reports.remove(tx, id, guard);
+      if (deleted) return deleted;
       // Nothing deleted: look the report up only now, to say why.
       this.assertCanChange(
         await this.reports.find(tx, id),
@@ -277,6 +332,7 @@ export class ReportsService {
       );
       throw new ForbiddenException(this.windowMessage());
     });
+    if (removed.fileKey) this.deleteStoredFile(removed.fileKey);
   }
 
   async getSettings(actor: Actor) {
@@ -323,6 +379,87 @@ export class ReportsService {
       this.reports.people(tx, opts),
     );
     return { items };
+  }
+
+  /**
+   * What a create or edit asks to attach. A new file must be one the caller
+   * uploaded (their own folder, still in storage); its size and type come from
+   * storage, never from the client. An edit may re-send its current file.
+   */
+  private async requestedAttachment(
+    dto: AttachmentRequest,
+    actor: Actor,
+    reportId: string | null,
+  ): Promise<ReportAttachment | null> {
+    if (dto.attachmentMode === 'url') {
+      return { type: 'url', url: normalizeUrl(dto.attachmentUrl) };
+    }
+    if (dto.attachmentMode !== 'file') return null;
+    const key = dto.fileKey ?? '';
+    if (!key) throw new BadRequestException('Upload the file first.');
+    const own = reportFilesPrefix(actor.tenant.id, actor.user.id);
+    if (!key.startsWith(own) || key.includes('..')) {
+      if (reportId) {
+        const current = await this.tenantDb.run(actor.tenant.id, (tx) =>
+          this.reports.find(tx, reportId),
+        );
+        if (
+          current?.attachment?.type === 'file' &&
+          current.attachment.key === key
+        ) {
+          return current.attachment;
+        }
+      }
+      throw new BadRequestException(
+        'That file can’t be attached. Upload it again.',
+      );
+    }
+    try {
+      const stored = await this.files.stat(key);
+      return {
+        type: 'file',
+        key,
+        name: cleanFileName(dto.fileName ?? key),
+        size: stored.size,
+        contentType: stored.contentType,
+      };
+    } catch (error) {
+      if (error instanceof StorageFileNotFoundError) {
+        throw new BadRequestException(
+          'That upload is gone. Upload the file again.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** Swaps a file's storage key for a short-lived download link under its own name. */
+  private async toPublic(view: ReportView): Promise<PublicReport> {
+    const a = view.attachment;
+    if (a?.type !== 'file') return view as PublicReport;
+    const url = await this.files.signedUrl(a.key, {
+      expiresIn: FILE_LINK_TTL,
+      filename: a.name,
+    });
+    return {
+      ...view,
+      attachment: {
+        type: 'file',
+        name: a.name,
+        size: a.size,
+        contentType: a.contentType,
+        url,
+      },
+    };
+  }
+
+  /** Best effort: a file left behind costs storage, not correctness. */
+  private deleteStoredFile(key: string): void {
+    void this.files.delete(key).catch((error: unknown) => {
+      this.logger.warn(
+        `Couldn't delete stored file ${key}: ${(error as Error).message}`,
+      );
+    });
   }
 
   private async settingsResponse(tx: TenantTx, actor: Actor) {

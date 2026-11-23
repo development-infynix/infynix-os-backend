@@ -14,6 +14,7 @@ import { reports, tenants, users } from '../src/db/schema.js';
 import { TenantDb } from '../src/db/tenant-db.js';
 import { ReportsRepository } from '../src/reports/reports.repository.js';
 import { ReportsService } from '../src/reports/reports.service.js';
+import { InMemoryDisk } from '@nestjs/storage';
 import type { Actor } from '../src/tenancy/tenancy.types.js';
 
 loadEnv();
@@ -23,11 +24,19 @@ const shift = (day: string, days: number) =>
     .toISOString()
     .slice(0, 10);
 
+const disk = new InMemoryDisk({
+  signedUrls: { baseUrl: 'http://files.test/files', keys: ['k'.repeat(32)] },
+});
+
 // Neon round trips: well past vitest's 5s default.
 describe('reports queries', { timeout: 60_000 }, () => {
   const pool = new Pool(pgPoolConfig());
   const db = drizzle({ client: pool });
-  const service = new ReportsService(new TenantDb(db), new ReportsRepository());
+  const service = new ReportsService(
+    new TenantDb(db),
+    new ReportsRepository(),
+    disk,
+  );
   const tag = randomUUID().slice(0, 8);
   const tenantIds: string[] = [];
   let owner: Actor;
@@ -227,6 +236,98 @@ describe('reports queries', { timeout: 60_000 }, () => {
     await expect(service.findOne(report.id, owner)).rejects.toMatchObject({
       status: 404,
     });
+  });
+
+  it('attaches only your own uploaded files, and removes them with the report', async () => {
+    const own = `tenants/${staff.tenant.id}/reports/${staff.user.id}/${tag}.pdf`;
+    await disk.put(own, Buffer.from('%PDF-1.7 test'), {
+      contentType: 'application/pdf',
+    });
+
+    const report = await service.create(
+      {
+        reportDate: today,
+        reports: ['with a file'],
+        attachmentMode: 'file',
+        fileKey: own,
+        fileName: 'C:\\fakepath\\Weekly plan.pdf',
+      },
+      staff,
+    );
+    expect(report.attachment).toMatchObject({
+      type: 'file',
+      name: 'Weekly plan.pdf',
+      size: 13,
+      contentType: 'application/pdf',
+    });
+    expect(report.attachment && 'key' in report.attachment).toBe(false); // the key never leaves the server
+    expect(report.attachment?.url).toContain('http://files.test/files');
+
+    // Someone else's key, or a missing upload, is refused.
+    const theirs = `tenants/${staff.tenant.id}/reports/${staff2.user.id}/${tag}.pdf`;
+    await disk.put(theirs, Buffer.from('%PDF-1.7'), {
+      contentType: 'application/pdf',
+    });
+    await expect(
+      service.create(
+        {
+          reportDate: shift(today, -1),
+          reports: ['x'],
+          attachmentMode: 'file',
+          fileKey: theirs,
+        },
+        staff,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.create(
+        {
+          reportDate: shift(today, -1),
+          reports: ['x'],
+          attachmentMode: 'file',
+          fileKey: `${own}.missing`,
+        },
+        staff,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // Keeping it leaves the file; switching to a link deletes it from storage.
+    await service.update(
+      report.id,
+      { reportDate: today, reports: ['with a file'], attachmentMode: 'keep' },
+      staff,
+    );
+    expect(await disk.exists(own)).toBe(true);
+    await service.update(
+      report.id,
+      {
+        reportDate: today,
+        reports: ['with a link'],
+        attachmentMode: 'url',
+        attachmentUrl: 'https://example.com',
+      },
+      staff,
+    );
+    await vi.waitFor(async () => expect(await disk.exists(own)).toBe(false));
+
+    // Deleting a report deletes its file too.
+    const again = `tenants/${staff.tenant.id}/reports/${staff.user.id}/${tag}-2.pdf`;
+    await disk.put(again, Buffer.from('%PDF-1.7'), {
+      contentType: 'application/pdf',
+    });
+    const second = await service.create(
+      {
+        reportDate: shift(today, -1),
+        reports: ['x'],
+        attachmentMode: 'file',
+        fileKey: again,
+        fileName: 'a.pdf',
+      },
+      staff,
+    );
+    await service.remove(second.id, owner);
+    await vi.waitFor(async () => expect(await disk.exists(again)).toBe(false));
+    await disk.delete(theirs);
   });
 
   it('keeps reports when their author is deleted', async () => {

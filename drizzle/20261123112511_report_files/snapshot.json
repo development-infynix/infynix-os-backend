@@ -1,0 +1,249 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "46ad5a03-8d94-4e66-ad62-f4a2284ba055",
+  "prevIds": [
+    "ffe0c19a-572e-489f-ac64-77f5a2828b8f"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "reports",
+        "attachment_key"
+      ],
+      "writes": [
+        "s|col|public.reports.attachment_key",
+        "n|col|public.reports.attachment_key",
+        "e|col|public.reports.attachment_key"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "reports",
+        "attachment_name"
+      ],
+      "writes": [
+        "s|col|public.reports.attachment_name",
+        "n|col|public.reports.attachment_name",
+        "e|col|public.reports.attachment_name"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "reports",
+        "attachment_size"
+      ],
+      "writes": [
+        "s|col|public.reports.attachment_size",
+        "n|col|public.reports.attachment_size",
+        "e|col|public.reports.attachment_size"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "reports",
+        "attachment_content_type"
+      ],
+      "writes": [
+        "s|col|public.reports.attachment_content_type",
+        "n|col|public.reports.attachment_content_type",
+        "e|col|public.reports.attachment_content_type"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "reports",
+        "reports_attachment_key_key"
+      ],
+      "writes": [
+        "s|idx|public.reports_attachment_key_key",
+        "n|idx|public.reports_attachment_key_key",
+        "e|idx|public.reports_attachment_key_key",
+        "n|rel|public.reports_attachment_key_key"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.attachment_key"
+      ]
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "reports"
+      ],
+      "writes": [
+        "s|ck|public.reports.reports_attachment_type_valid"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.attachment_type",
+        "e|col|public.reports.attachment_type"
+      ],
+      "sqlHash": "e0c82d4c16c6d78d"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "reports"
+      ],
+      "writes": [
+        "s|ck|public.reports.reports_attachment_shape"
+      ],
+      "reads": [
+        "n|tbl|public.reports",
+        "n|sch|public",
+        "n|col|public.reports.attachment_type",
+        "n|col|public.reports.attachment_url",
+        "n|col|public.reports.attachment_key",
+        "n|col|public.reports.attachment_name",
+        "n|col|public.reports.attachment_size",
+        "n|col|public.reports.attachment_content_type",
+        "e|col|public.reports.attachment_type",
+        "e|col|public.reports.attachment_url"
+      ],
+      "sqlHash": "e1b40bc71fdb6885"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "attachment_key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "attachment_name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "attachment_size",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "attachment_content_type",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "reports",
+        "name": "reports_attachment_key_key",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "attachment_key",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"reports\",\"reports_attachment_type_valid\"]",
+      "set": {
+        "value": "\"attachment_type\" IS NULL OR \"attachment_type\" IN ('url', 'file')"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"reports\",\"reports_attachment_shape\"]",
+      "set": {
+        "value": "(\n        (\"attachment_type\" IS NULL AND \"attachment_url\" IS NULL AND \"attachment_key\" IS NULL)\n        OR (\"attachment_type\" = 'url' AND \"attachment_url\" IS NOT NULL AND \"attachment_key\" IS NULL)\n        OR (\"attachment_type\" = 'file' AND \"attachment_url\" IS NULL AND \"attachment_key\" IS NOT NULL\n            AND \"attachment_name\" IS NOT NULL AND \"attachment_size\" IS NOT NULL\n            AND \"attachment_content_type\" IS NOT NULL)\n      )"
+      }
+    }
+  ]
+}

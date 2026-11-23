@@ -26,7 +26,8 @@ The menu grant is checked once, by `ReportsPolicy` on every route; the service o
 - **Date.** A report covers one plain `YYYY-MM-DD` date. "Today" is today in the company's timezone. A report can't be dated in the future, or on an off day.
 - **One per person per day.** Enforced by the unique index `(tenant_id, created_by, report_date)`. A duplicate is a 409 from the insert itself; there is no check-then-insert.
 - **Points.** 1–100 points, each 1–5000 characters after trimming.
-- **Attachment.** Links only for now (`http`/`https`, up to 2048 characters). File uploads wait for a storage service. Modes: `none`, `url`, and `keep` (edit only).
+- **Attachment.** One per report: a link (`http`/`https`, up to 2048 characters) or an uploaded file, never both. Modes: `none`, `url`, `file` (with `fileKey`/`fileName`), and `keep` (edit only).
+- **Files.** `POST /reports/files` (multipart field `file`, 10 MB, PDF / images / Word / Excel / PowerPoint / CSV / text) streams the file with `@nestjs/storage` into the `S3_BUCKET` bucket (Neon Object Storage, `agency-os`) at `tenants/<company>/reports/<person>/<uuid>.<ext>`; the type is detected from the bytes (built in for images and PDF, a signature-plus-extension check for Office and text), 413/415 otherwise. The report then attaches the returned key: it must be in the caller's own folder and still exist; size and type come from storage. Responses never include the key, only a 15-minute signed download link that saves under the original name. Replacing or removing a file, or deleting the report, deletes it from storage after the database change commits (best effort, logged). An upload that is never attached stays in storage (no cleanup job yet).
 - **Edited.** `edited_at` is set when an edit changes the date, points or link. Remarks don't count as an edit.
 - **Late.** `due_time IS NOT NULL AND submitted_at > ((report_date + due_time) AT TIME ZONE timezone)`, computed on read from the current settings, so changing the due time re-judges old reports. A back-filled report (yesterday's, filed today) is late; moving a report's date re-judges it. Reminders for missing reports come later, with the notifications module.
 - **Clocks.** "Today", late and the 15-minute window use the database clock (`now()`), never the browser's. The drawer shows "Editable until …" from `submittedAt + 15 min`; a 403 from the server wins.
@@ -80,10 +81,10 @@ Tested against the real database in `test/reports.e2e-spec.ts`.
 `frontend/src/reports/`, route `/_authed/reports` with `page`, `date` and `userId` in the URL.
 
 - **Toolbar (right):** **All users ▾** (owner, manager; server-side search), **All dates ▾** (date field, Today, All dates), the one primary action **New report**, and the owner's settings (sliders icon). On phones the two filters are icons with a green dot when active.
-- **Grid:** one raised card per report, newest first, 1/2/3 columns; server paging, 50 per page. A card reads top to bottom: the date (title) and "Created by …" (staff: the weekday) with the works count top right; "Submitted" with its time, Late (muted red) and Edited; the first work; the link and "Remarks added" when present. The whole card opens the drawer.
+- **Grid:** one raised card per report, newest first, 1/2/3 columns; server paging, 100 per page. A card reads top to bottom: the date (title) and "Created by …" (staff: the weekday) with the works count top right; "Submitted" with its time, Late (muted red) and Edited; the first work; the link and "Remarks added" when present. The whole card opens the drawer.
 - **Drawer and settings:** view, edit, remarks, delete; timezone, due time, off days.
 - `GET /reports/calendar` and `components/MonthCalendar.tsx` stay for the Calendar module; Reports doesn't use them now.
 
 ## Not in this version
 
-File attachments (needs object storage), missing-report reminders and remark notifications (needs a notifications module).
+Missing-report reminders and remark notifications (needs a notifications module); a cleanup job for uploads that were never attached.
