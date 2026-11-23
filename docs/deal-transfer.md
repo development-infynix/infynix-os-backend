@@ -37,7 +37,7 @@ Moving deals to another pipeline, or adding them to another pipeline as well, by
 | T9 | **500 deals per request**, each request one statement under the locks below, looping until done, with progress (see [performance.md](performance.md)). |
 | T10 | **Positions:** moved or added deals go to the end of the landing stage, in their source order (source stage, then their position there). Gaps left in the source stages are harmless: order is by position, and the next drag renumbers that stage. |
 | T11 | **Scope (confirmed):** the Deal transfer drawer, by stage. Not in this version: single-deal transfer from a card (with owner options), the board's **Select** toolbar actions, the card menu items, and the client activity log (we don't have one). |
-| T12 | **The action is chosen on the card (confirmed 21 Nov):** the Deal transfer card is a menu card, like Manage pipeline, with **Add to pipeline** and **Move to pipeline**. Each opens the drawer set to that action, titled with it. Retargeting (a third option in the original idea) isn't wanted. The reference's "How to select deals" step stays as step 1 (By stage; By fields is Coming soon). Move was built first, then Add, on the same endpoint and drawer. |
+| T12 | **The action is chosen on the card (confirmed 21 Nov):** the Deal transfer card is a menu card, like Manage pipeline, with **Add to pipeline** and **Move to pipeline**. Each opens the drawer set to that action, titled with it. Retargeting (a third option in the original idea) isn't wanted. The reference's "How to select deals" step (By stage / By fields) is dropped (23 Nov): the drawer opens on the stages. Move was built first, then Add, on the same endpoint and drawer. |
 
 ---
 
@@ -87,15 +87,14 @@ After a transfer, the board, the pipeline list and the assignment overview are r
 ## 6. Frontend
 
 - **Entry points**, all opening the same `DealTransferDrawer`; Add and Move appear only for the Owner and managers (T8):
-  - **Actions › Deal transfer:** a menu card (the shared `MenuCard`, also used by Manage pipeline) with **Add to pipeline** and **Move to pipeline**. Deals are chosen by whole stages, through all three steps.
+  - **Actions › Deal transfer:** a menu card (the shared `MenuCard`, also used by Manage pipeline) with **Add to pipeline** and **Move to pipeline**. Deals are chosen by whole stages, through both steps.
   - **Board › Select:** the Select button's menu offers **Move to pipeline**, **Add to pipeline** and **Delete** for the ticked cards. Move and Add pass those deal ids (`dealIds` prop): the drawer opens at Destination with no steps strip, and select mode ends when the run finishes.
   - **Card options:** the settings icon on each card opens a floating menu (`DealOptionsMenu`, portaled so the scrolling column can't clip it) with **Add to pipeline**, **Move to pipeline** and **Delete** for that one deal. Add and Move open the drawer at Destination like Select.
 - **The drawer** opens set to the chosen action, a right-side sheet like the others. It can't be closed while running.
   - **Header:** **Add to pipeline** or **Move to pipeline** (with its icon), the source pipeline's name, and close.
-  - **Steps strip:** **Select · Stages · Destination**, with done steps ticked and the current one in green.
-  - **Step 1, "How to select deals":** radio cards: **By stage** (selected) and **By fields** (greyed out, **Coming soon**).
-  - **Step 2, "Choose stages":** a raised row per stage with its deal count (the true total, not just loaded cards), and **Clear**. Empty stages are disabled.
-  - **Step 3, "Destination":**
+  - **Steps strip:** **Stages · Destination**, with done steps ticked and the current one in green. (Selecting **By fields** was dropped on 23 Nov; deals are chosen by stage only.)
+  - **Step 1, "Choose stages":** a raised row per stage with its deal count (the true total, not just loaded cards), and **Clear**. Empty stages are disabled.
+  - **Step 2, "Destination":**
     - a line that follows the action ("The deals leave ‹source›…" or "The deals stay in ‹source›; new deals for the same clients go to…")
     - the other pipelines as radio rows; the chosen one folds open to **Land in stage**, a radio list of its stages with the first preselected (the shared `PipelineOption` picker)
   - **Owner notice:** once a target is picked, a strip above the footer reads the target's assignment rule live: Round robin ("shared in turn between N people"), Single user ("every deal will go to ‹person›"), or Creator / Manual / nobody eligible ("will arrive unassigned"). Move adds "Their current owners are reset."

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { assertContact, normalizeContact } from '../clients/clients.service.js';
 import { ClientsRepository, type Client } from '../clients/clients.repository.js';
-import { isUniqueViolation } from '../db/errors.js';
+import { isForeignKeyViolation, isUniqueViolation } from '../db/errors.js';
 import { TenantDb, type TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import {
@@ -276,17 +276,23 @@ export class CrmService {
   }
 
   async deleteStage(actor: Actor, id: string): Promise<void> {
-    await this.tenantDb.run(actor.tenant.id, async (tx) => {
-      await this.findStageOrFail(tx, actor, id);
-      const deals = await this.crm.countDealsInStage(tx, id);
-      if (deals > 0) {
-        throw new ConflictException(
-          'Move or delete this stage’s deals before deleting it',
-        );
-      }
-      await this.crm.removeStage(tx, id);
-    });
+    const notEmpty = () => new ConflictException('Move or delete this stage’s deals before deleting it');
+    try {
+      await this.tenantDb.run(actor.tenant.id, async (tx) => {
+        const stage = await this.findStageOrFail(tx, actor, id);
+        // Queue behind moves, transfers and bulk adds in this pipeline, so a
+        // deal can't land in the stage between the count and the delete.
+        await this.crm.lockPipeline(tx, stage.pipelineId);
+        if ((await this.crm.countDealsInStage(tx, id)) > 0) throw notEmpty();
+        await this.crm.removeStage(tx, id);
+      });
+    } catch (error) {
+      // A deal that arrived without taking the lock: the stage is still in use.
+      if (isForeignKeyViolation(error)) throw notEmpty();
+      throw error;
+    }
   }
+
 
   /* ── Deals and board ──────────────────────────────────────────────────── */
 

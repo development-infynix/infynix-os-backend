@@ -2,7 +2,7 @@
 
 Port of the CRM from our earlier single-tenant ERP to Infynix OS (multi-tenant).
 
-- **Status (21 Nov 2026):** Phases 1–3 built (Core, Assignment, Transfer). Left: delete confirmations that mention deals, manual run-throughs, and the activity log. Details in **Phases** below.
+- **Status (23 Nov 2026):** Phases 1–3 built (Core, Assignment, Transfer). Left: manual run-throughs, the activity log and permissions. Details in **Phases** below.
 - **Reference backend:** https://github.com/explorewings/erp-backend/tree/main/src/crm (schema: `src/schema/crm.ts`)
 - **Reference frontend:** https://github.com/explorewings/erp-frontend/tree/main/src/crm
 - **Related docs:**
@@ -105,7 +105,10 @@ Built:
 - [x] **Performance:** the board, the pipeline list and every bulk action follow [performance.md](performance.md). Opening the CRM went from about 4 s to about 1 s from a developer machine.
 
 Still to do:
-- [ ] **Delete confirmations should mention deals.** Deleting an import, or a client, also deletes their deals; neither confirmation says so yet.
+- [x] **Delete confirmations mention deals:** deleting a client (one or a selection) or an import says their deals in every CRM pipeline go too.
+- [x] **Fixes from the 23 Nov review:**
+  - stage delete takes the pipeline lock before checking the stage is empty, and maps a late foreign-key clash to the friendly 409, never a 500
+  - the board drops selected cards that vanished after a refresh, so Move / Add / Delete never send deals someone else moved
 
 ### Phase 2: Assignment (built 20–21 Nov 2026)
 
@@ -129,14 +132,13 @@ See [deal-transfer.md](deal-transfer.md).
 
 - [x] **Move** and **Add** (copy) deals to another pipeline through one endpoint, 500 per request, with skipped clients named. Owners follow the reference: cleared, then reassigned only if the target uses Round robin or Single user.
 - [x] **Three ways in**, all the same drawer:
-  - the **Deal transfer** card in Actions (a menu card: Add / Move), by whole stages: **Select · Stages · Destination**
+  - the **Deal transfer** card in Actions (a menu card: Add / Move), by whole stages: **Stages · Destination**
   - the board's **Select** menu, for the ticked cards
   - a card's **options** menu, for that one deal
   The last two open straight at Destination.
 - [x] A strip above the footer says what the target's assignment rule will do to owners.
 - [x] **Tests:** 8 e2e tests (Move, Add, owners by rule, errors, a 500-deal chunk, and bulk delete).
 - [ ] Manual run-through of section 8 of deal-transfer.md.
-- [ ] Selecting deals **By fields** (shown as Coming soon).
 
 ### Not yet planned
 
