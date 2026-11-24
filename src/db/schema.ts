@@ -236,7 +236,10 @@ export const clientImports = pgTable.withRLS(
     uniqueIndex('client_imports_tenant_id_id_key').on(t.tenantId, t.id),
     check('client_imports_row_count_max', sql`${t.rowCount} <= 500`),
     check('client_imports_name_not_blank', sql`length(btrim(${t.name})) > 0`),
-    check('client_imports_file_name_not_blank', sql`length(btrim(${t.fileName})) > 0`),
+    check(
+      'client_imports_file_name_not_blank',
+      sql`length(btrim(${t.fileName})) > 0`,
+    ),
     tenantIsolation(t.tenantId),
   ],
 );
@@ -306,9 +309,16 @@ export const clients = pgTable.withRLS(
  * was assigned (see docs/user-deals-assignment.md). `manual` as a source means
  * a person picked the owner in the deal drawer.
  */
-export const CRM_ASSIGNMENT_RULES = ['creator', 'manual', 'round_robin', 'single_user'] as const;
+export const CRM_ASSIGNMENT_RULES = [
+  'creator',
+  'manual',
+  'round_robin',
+  'single_user',
+] as const;
 export type CrmAssignmentRule = (typeof CRM_ASSIGNMENT_RULES)[number];
-const assignmentValues = sql.raw(CRM_ASSIGNMENT_RULES.map((rule) => `'${rule}'`).join(', '));
+const assignmentValues = sql.raw(
+  CRM_ASSIGNMENT_RULES.map((rule) => `'${rule}'`).join(', '),
+);
 
 /**
  * A pipeline owns an ordered list of stages and the deals inside it. Every
@@ -326,13 +336,18 @@ export const crmPipelines = pgTable.withRLS(
     /** Order in the pipeline picker; lower first. */
     position: integer().notNull().default(0),
     /** Who owns deals added from now on. */
-    assignmentRule: text('assignment_rule').$type<CrmAssignmentRule>().notNull().default('creator'),
+    assignmentRule: text('assignment_rule')
+      .$type<CrmAssignmentRule>()
+      .notNull()
+      .default('creator'),
     /** The `single_user` rule's person; must be on this pipeline's access list. */
     singleUserId: uuid('single_user_id'),
     /** Where round robin carries on: shared by the rule and the Share tool. */
     roundRobinCursor: integer('round_robin_cursor').notNull().default(0),
     /** Who created it (null for the seeded default and pipelines made before this was recorded). */
-    createdBy: uuid('created_by').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
+    createdBy: uuid('created_by').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamptz('created_at').notNull().defaultNow(),
     updatedAt: timestamptz('updated_at')
       .notNull()
@@ -342,14 +357,24 @@ export const crmPipelines = pgTable.withRLS(
   // Annotated: pipelines and their access list reference each other.
   (t): PgTableExtraConfigValue[] => [
     index('crm_pipelines_tenant_id_idx').on(t.tenantId),
-    check('crm_pipelines_assignment_rule', sql`${t.assignmentRule} in (${assignmentValues})`),
-    check('crm_pipelines_round_robin_cursor_nonnegative', sql`${t.roundRobinCursor} >= 0`),
+    check(
+      'crm_pipelines_assignment_rule',
+      sql`${t.assignmentRule} in (${assignmentValues})`,
+    ),
+    check(
+      'crm_pipelines_round_robin_cursor_nonnegative',
+      sql`${t.roundRobinCursor} >= 0`,
+    ),
     // The single-user target must be on the access list. The migration writes
     // ON DELETE SET NULL ("single_user_id"): only that column, not tenant/pipeline.
     foreignKey({
       name: 'crm_pipelines_single_user_fk',
       columns: [t.tenantId, t.id, t.singleUserId],
-      foreignColumns: [crmPipelineUsers.tenantId, crmPipelineUsers.pipelineId, crmPipelineUsers.userId],
+      foreignColumns: [
+        crmPipelineUsers.tenantId,
+        crmPipelineUsers.pipelineId,
+        crmPipelineUsers.userId,
+      ],
     }).onDelete('set null'),
     index('crm_pipelines_position_idx').on(t.position),
     // Target for tenant-safe foreign keys from stages and deals.
@@ -403,7 +428,10 @@ export const crmPipelineStages = pgTable.withRLS(
       columns: [t.tenantId, t.pipelineId],
       foreignColumns: [crmPipelines.tenantId, crmPipelines.id],
     }).onDelete('cascade'),
-    check('crm_pipeline_stages_name_not_blank', sql`length(btrim(${t.name})) > 0`),
+    check(
+      'crm_pipeline_stages_name_not_blank',
+      sql`length(btrim(${t.name})) > 0`,
+    ),
     check('crm_pipeline_stages_position_nonnegative', sql`${t.position} >= 0`),
     tenantIsolation(t.tenantId),
   ],
@@ -477,7 +505,11 @@ export const crmDeals = pgTable.withRLS(
     foreignKey({
       name: 'crm_deals_owner_fk',
       columns: [t.tenantId, t.pipelineId, t.ownerId],
-      foreignColumns: [crmPipelineUsers.tenantId, crmPipelineUsers.pipelineId, crmPipelineUsers.userId],
+      foreignColumns: [
+        crmPipelineUsers.tenantId,
+        crmPipelineUsers.pipelineId,
+        crmPipelineUsers.userId,
+      ],
     }).onDelete('set null'),
     index('crm_deals_pipeline_owner_idx').on(t.pipelineId, t.ownerId),
     // "Oldest unassigned first" for Share and Give.
@@ -508,10 +540,17 @@ export const crmPipelineUsers = pgTable.withRLS(
   },
   // Annotated: pipelines and their access list reference each other.
   (t): PgTableExtraConfigValue[] => [
-    primaryKey({ name: 'crm_pipeline_users_pkey', columns: [t.pipelineId, t.userId] }),
+    primaryKey({
+      name: 'crm_pipeline_users_pkey',
+      columns: [t.pipelineId, t.userId],
+    }),
     // Target for tenant-safe foreign keys: a deal's owner and a pipeline's
     // single-user target must be on that pipeline's access list.
-    uniqueIndex('crm_pipeline_users_tenant_pipeline_user_key').on(t.tenantId, t.pipelineId, t.userId),
+    uniqueIndex('crm_pipeline_users_tenant_pipeline_user_key').on(
+      t.tenantId,
+      t.pipelineId,
+      t.userId,
+    ),
     index('crm_pipeline_users_user_idx').on(t.userId),
     foreignKey({
       name: 'crm_pipeline_users_pipeline_fk',
@@ -545,7 +584,10 @@ export const reports = pgTable.withRLS(
     reportItems: jsonb('report_items').$type<string[]>().notNull().default([]),
     createdBy: uuid('created_by'),
     submittedAt: timestamptz('submitted_at').notNull().defaultNow(),
-    updatedAt: timestamptz('updated_at').notNull().defaultNow().$onUpdate(() => new Date()),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
     editedAt: timestamptz('edited_at'),
     attachmentType: text('attachment_type'),
     attachmentUrl: text('attachment_url'),
@@ -567,7 +609,11 @@ export const reports = pgTable.withRLS(
       columns: [t.tenantId, t.createdBy],
       foreignColumns: [users.tenantId, users.id],
     }).onDelete('set null'),
-    uniqueIndex('reports_tenant_created_by_date_key').on(t.tenantId, t.createdBy, t.reportDate),
+    uniqueIndex('reports_tenant_created_by_date_key').on(
+      t.tenantId,
+      t.createdBy,
+      t.reportDate,
+    ),
     check('reports_items_array', sql`jsonb_typeof(${t.reportItems}) = 'array'`),
     check(
       'reports_attachment_type_valid',
@@ -602,7 +648,10 @@ export const reportSettings = pgTable.withRLS(
     dueTime: time('due_time'),
     skipDays: smallint('skip_days').array().notNull().default([]),
     updatedBy: uuid('updated_by'),
-    updatedAt: timestamptz('updated_at').notNull().defaultNow().$onUpdate(() => new Date()),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     // The migration writes ON DELETE SET NULL ("updated_by").
@@ -617,3 +666,158 @@ export const reportSettings = pgTable.withRLS(
 
 export type ReportRow = typeof reports.$inferSelect;
 export type ReportSettingsRow = typeof reportSettings.$inferSelect;
+
+/* ── Calendar (docs/calendar-plan.md) ────────────────────────────────────── */
+
+export const CALENDAR_EVENT_TYPES = ['announcement', 'meeting'] as const;
+export type CalendarEventType = (typeof CALENDAR_EVENT_TYPES)[number];
+
+/**
+ * Announcements and meetings. Stored status is only scheduled | cancelled;
+ * upcoming / live / ended are derived from the time window when read.
+ * Deleting is soft (deleted_at), so the activity log keeps its event.
+ */
+export const calendarEvents = pgTable.withRLS(
+  'calendar_events',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    type: text().notNull().$type<CalendarEventType>(),
+    title: text().notNull(),
+    description: text(),
+    status: text()
+      .notNull()
+      .default('scheduled')
+      .$type<'scheduled' | 'cancelled'>(),
+    startsAt: timestamptz('starts_at').notNull(),
+    endsAt: timestamptz('ends_at').notNull(),
+    /** Meeting only: a room, an address or a link. */
+    location: text(),
+    /** Meeting only: open (everyone) or private (creator and members). */
+    visibility: text().$type<'open' | 'private'>(),
+    cancelReason: text('cancel_reason'),
+    /** Optimistic concurrency: an edit names the version it read. */
+    version: integer().notNull().default(1),
+    createdBy: uuid('created_by'),
+    deletedAt: timestamptz('deleted_at'),
+    deletedBy: uuid('deleted_by'),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+    updatedAt: timestamptz('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_events_tenant_starts_idx').on(t.tenantId, t.startsAt),
+    index('calendar_events_tenant_ends_idx').on(t.tenantId, t.endsAt),
+    index('calendar_events_created_by_idx').on(t.createdBy),
+    // Target for same-company foreign keys from members and the log.
+    uniqueIndex('calendar_events_tenant_id_id_key').on(t.tenantId, t.id),
+    // The migration writes ON DELETE SET NULL ("created_by") / ("deleted_by"): a deleted person's events stay.
+    foreignKey({
+      name: 'calendar_events_created_by_fk',
+      columns: [t.tenantId, t.createdBy],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('set null'),
+    foreignKey({
+      name: 'calendar_events_deleted_by_fk',
+      columns: [t.tenantId, t.deletedBy],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('set null'),
+    check(
+      'calendar_events_type_valid',
+      sql`${t.type} IN ('announcement', 'meeting')`,
+    ),
+    check(
+      'calendar_events_status_valid',
+      sql`${t.status} IN ('scheduled', 'cancelled')`,
+    ),
+    check(
+      'calendar_events_title_not_blank',
+      sql`length(btrim(${t.title})) > 0`,
+    ),
+    check('calendar_events_time_order', sql`${t.endsAt} > ${t.startsAt}`),
+    // Each type carries exactly its own fields.
+    check(
+      'calendar_events_type_shape',
+      sql`(
+        (${t.type} = 'announcement' AND ${t.description} IS NOT NULL
+          AND ${t.location} IS NULL AND ${t.visibility} IS NULL)
+        OR (${t.type} = 'meeting' AND ${t.location} IS NOT NULL
+          AND ${t.visibility} IN ('open', 'private'))
+      )`,
+    ),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+/** Who is invited to a meeting. The creator is implicitly a member. */
+export const calendarMeetingMembers = pgTable.withRLS(
+  'calendar_meeting_members',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'calendar_meeting_members_pkey',
+      columns: [t.tenantId, t.eventId, t.userId],
+    }),
+    index('calendar_meeting_members_user_idx').on(t.tenantId, t.userId),
+    foreignKey({
+      name: 'calendar_meeting_members_event_fk',
+      columns: [t.tenantId, t.eventId],
+      foreignColumns: [calendarEvents.tenantId, calendarEvents.id],
+    }).onDelete('cascade'),
+    // Deleting a person removes their invitations.
+    foreignKey({
+      name: 'calendar_meeting_members_user_fk',
+      columns: [t.tenantId, t.userId],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('cascade'),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+/** Every change to an event: who, what, and the status move, for history later. */
+export const calendarEventLog = pgTable.withRLS(
+  'calendar_event_log',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references((): AnyPgColumn => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').notNull(),
+    actorId: uuid('actor_id'),
+    action: text().notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status'),
+    reason: text(),
+    meta: jsonb(),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_event_log_event_idx').on(
+      t.tenantId,
+      t.eventId,
+      t.createdAt,
+    ),
+    foreignKey({
+      name: 'calendar_event_log_event_fk',
+      columns: [t.tenantId, t.eventId],
+      foreignColumns: [calendarEvents.tenantId, calendarEvents.id],
+    }).onDelete('cascade'),
+    // The migration writes ON DELETE SET NULL ("actor_id").
+    foreignKey({
+      name: 'calendar_event_log_actor_fk',
+      columns: [t.tenantId, t.actorId],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('set null'),
+    tenantIsolation(t.tenantId),
+  ],
+);
+
+export type CalendarEventRow = typeof calendarEvents.$inferSelect;

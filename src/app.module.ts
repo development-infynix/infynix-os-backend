@@ -7,6 +7,7 @@ import { StorageModule } from '@nestjs/storage';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { AccessModule } from './access/access.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { CalendarModule } from './calendar/calendar.module.js';
 import { ClientsModule } from './clients/clients.module.js';
 import { CrmModule } from './crm/crm.module.js';
 import { allowedOrigins } from './config/origins.js';
@@ -60,6 +61,7 @@ import { UsersModule } from './users/users.module.js';
     AccessModule,
     MembersModule,
     ReportsModule,
+    CalendarModule,
     ClientsModule,
     CrmModule,
     AuthModule,
