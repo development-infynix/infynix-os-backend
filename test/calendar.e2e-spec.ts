@@ -176,6 +176,7 @@ describe('calendar', { timeout: 60_000 }, () => {
       canEdit: true,
       canCancel: true,
       canRestore: false,
+      actions: [],
       canDelete: true,
     });
     expect(await visibleIds(owner)).toContain(meeting.id);
@@ -214,7 +215,8 @@ describe('calendar', { timeout: 60_000 }, () => {
         canEdit: false,
         canCancel: true,
         canRestore: false,
-        canDelete: false,
+        actions: [],
+      canDelete: false,
       });
     }
     expect(
@@ -241,6 +243,7 @@ describe('calendar', { timeout: 60_000 }, () => {
       canEdit: false,
       canCancel: false,
       canRestore: false,
+      actions: [],
       canDelete: true,
     });
     await expect(
@@ -278,6 +281,7 @@ describe('calendar', { timeout: 60_000 }, () => {
       canEdit: true,
       canCancel: false,
       canRestore: true,
+      actions: [],
       canDelete: true,
     });
     const moved = await service.update(owner, meeting.id, {
@@ -326,6 +330,7 @@ describe('calendar', { timeout: 60_000 }, () => {
       canEdit: false,
       canCancel: false,
       canRestore: false,
+      actions: [],
       canDelete: true,
     });
     await expect(

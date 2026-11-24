@@ -136,16 +136,16 @@ Self-assigned tasks skip review and cancel requests: start, then **Complete**; h
 
 **Deleted assignee (T6).** A database trigger (`users_return_calendar_tasks`) hands their open tasks back to the creator as assigned and logs `reassigned`; finished ones keep no assignee ("Deleted user").
 
-**On the calendar.** A task shows only on its **deadline day**, sorted by due time. Its card shows the due time (muted red when failed), high or urgent priority, and the other person ("For Sam", or "From Max" when it's yours). The drawer shows the **Next step** panel (only the steps the server allows; steps with inputs open a form in place), then the details (status, due, priority, assigned to, created by, hold, more time asked, cancel reason, times sent back, completion notes). Edit and Delete sit in the footer.
+**On the calendar.** A task shows only on its **deadline day**, sorted by due time. Its card shows the due time (muted red when failed) and the other person ("For Sam", or "From Max" when it's yours). The drawer shows a **Status** dropdown (the current status plus only the moves the server allows this viewer, e.g. "Submit → In review"; the chosen move's inputs and Save appear under it), then the details (status, due, priority, assigned to, created by, hold, more time asked, cancel reason, times sent back, completion notes). Edit and Delete sit in the footer.
 
 **API.** `POST /calendar` with `{ type: 'task', title, description?, deadline, assigneeId?, priority? }` (assignee defaults to you, priority to medium). `PATCH /calendar/:id` with `{ version, action, ...inputs }` for a step, or `{ version, title?, description?, deadline?, assigneeId?, priority? }` for an edit. `GET /calendar/people?for=assign` lists whom you may assign. A task in a response adds `assigneeId, assigneeName, priority, previousStatus, holdReason, holdUntil, completionRemarks, rejectCount, extensionUntil, extensionReason`, and `permissions.actions: [{ action, to, fields }]`. `endsAt` is the deadline; `startsAt` is when it was created.
 
-**Data.** Task columns on `calendar_events`: assignee_id (composite FK, `ON DELETE SET NULL ("assignee_id")`), priority, previous_status, hold_reason, hold_until, completion_remarks, reject_count, extension_until, extension_reason. Checks keep task statuses and fields to tasks, and a hold always has an end. Migration: `calendar_tasks` (with the T6 trigger).
+**Data.** Task columns on `calendar_events`: assignee_id (composite FK, `ON DELETE SET NULL ("assignee_id")`), priority, previous_status, hold_reason, hold_until, completion_remarks, reject_count, extension_until, extension_reason. Checks keep task statuses and fields to tasks, and a hold always has an end. Migrations: `calendar_tasks` (with the T6 trigger) and `calendar_tasks_trigger_fix` (skips the hand-back while the company or the creator is being deleted).
 
-Tested in `test/calendar-tasks.e2e-spec.ts` (10 cases).
+Tested in `test/calendar-tasks.e2e-spec.ts` (11 cases, including deleting a whole company with open tasks).
 
 ## Deploying
 
-1. Run `pnpm db:migrate` against production (the `calendar` and `calendar_tasks` migrations).
+1. Run `pnpm db:migrate` against production (`calendar`, `calendar_tasks`, `calendar_tasks_trigger_fix`).
 2. Grant the **Calendar** menu to the people who should use it (System › person › Permissions).
 3. Restart or redeploy the backend.

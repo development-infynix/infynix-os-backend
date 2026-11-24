@@ -271,6 +271,16 @@ describe('calendar tasks', { timeout: 90_000 }, () => {
     expect(log.rows[0].action).toBe('reassigned');
   });
 
+  it('deletes a whole company with open tasks in it', async () => {
+    const [c] = await db.insert(tenants).values({ name: `Tasks C ${tag}` }).returning({ id: tenants.id });
+    const boss = await person(c.id, 'Cara Owner', 'owner');
+    const worker = await person(c.id, 'Wes Staff', 'staff');
+    await task(boss, worker);
+    await db.delete(tenants).where(eq(tenants.id, c.id));
+    const left = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, c.id));
+    expect(left).toEqual([]);
+  });
+
   it('keeps meetings and announcements free of task fields and steps', async () => {
     const meeting = await service.create(owner, {
       type: 'meeting',
