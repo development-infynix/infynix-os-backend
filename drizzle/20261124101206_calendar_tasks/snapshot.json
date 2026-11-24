@@ -1,0 +1,560 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "efdd31bb-0067-460a-aa04-bd596eb0b32f",
+  "prevIds": [
+    "40d7ce9c-b3ea-480a-a728-17fc2a8ce6fd"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "assignee_id"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.assignee_id",
+        "n|col|public.calendar_events.assignee_id",
+        "e|col|public.calendar_events.assignee_id"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "priority"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.priority",
+        "n|col|public.calendar_events.priority",
+        "e|col|public.calendar_events.priority"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "previous_status"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.previous_status",
+        "n|col|public.calendar_events.previous_status",
+        "e|col|public.calendar_events.previous_status"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "hold_reason"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.hold_reason",
+        "n|col|public.calendar_events.hold_reason",
+        "e|col|public.calendar_events.hold_reason"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "hold_until"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.hold_until",
+        "n|col|public.calendar_events.hold_until",
+        "e|col|public.calendar_events.hold_until"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "completion_remarks"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.completion_remarks",
+        "n|col|public.calendar_events.completion_remarks",
+        "e|col|public.calendar_events.completion_remarks"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "reject_count"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.reject_count",
+        "n|col|public.calendar_events.reject_count",
+        "e|col|public.calendar_events.reject_count"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "extension_until"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.extension_until",
+        "n|col|public.calendar_events.extension_until",
+        "e|col|public.calendar_events.extension_until"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "calendar_events",
+        "extension_reason"
+      ],
+      "writes": [
+        "s|col|public.calendar_events.extension_reason",
+        "n|col|public.calendar_events.extension_reason",
+        "e|col|public.calendar_events.extension_reason"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "calendar_events",
+        "calendar_events_assignee_idx"
+      ],
+      "writes": [
+        "s|idx|public.calendar_events_assignee_idx",
+        "n|idx|public.calendar_events_assignee_idx",
+        "e|idx|public.calendar_events_assignee_idx",
+        "n|rel|public.calendar_events_assignee_idx"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public",
+        "n|col|public.calendar_events.tenant_id",
+        "n|col|public.calendar_events.assignee_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "calendar_events"
+      ],
+      "writes": [
+        "s|fk|public.calendar_events.calendar_events_assignee_fk",
+        "n|fk|public.calendar_events.calendar_events_assignee_fk",
+        "e|fk|public.calendar_events.calendar_events_assignee_fk",
+        "n|con|public.calendar_events.calendar_events_assignee_fk"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public",
+        "n|tbl|public.users",
+        "n|sch|public",
+        "n|col|public.calendar_events.tenant_id",
+        "n|col|public.calendar_events.assignee_id",
+        "n|col|public.users.tenant_id",
+        "n|col|public.users.id",
+        "e|uniqueness|public.users.id.tenant_id"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "calendar_events"
+      ],
+      "writes": [
+        "s|ck|public.calendar_events.calendar_events_hold_shape",
+        "n|ck|public.calendar_events.calendar_events_hold_shape",
+        "e|ck|public.calendar_events.calendar_events_hold_shape",
+        "n|con|public.calendar_events.calendar_events_hold_shape"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public",
+        "n|col|public.calendar_events.status",
+        "n|col|public.calendar_events.hold_until"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "calendar_events"
+      ],
+      "writes": [
+        "s|ck|public.calendar_events.calendar_events_reject_count",
+        "n|ck|public.calendar_events.calendar_events_reject_count",
+        "e|ck|public.calendar_events.calendar_events_reject_count",
+        "n|con|public.calendar_events.calendar_events_reject_count"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public",
+        "n|col|public.calendar_events.reject_count"
+      ]
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "calendar_events"
+      ],
+      "writes": [
+        "s|ck|public.calendar_events.calendar_events_type_valid"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public",
+        "n|col|public.calendar_events.type",
+        "e|col|public.calendar_events.type"
+      ],
+      "sqlHash": "c007de526b96a3ce"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "calendar_events"
+      ],
+      "writes": [
+        "s|ck|public.calendar_events.calendar_events_status_valid"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public",
+        "n|col|public.calendar_events.type",
+        "n|col|public.calendar_events.status",
+        "e|col|public.calendar_events.status"
+      ],
+      "sqlHash": "0bffb55ec6d8de25"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "calendar_events"
+      ],
+      "writes": [
+        "s|ck|public.calendar_events.calendar_events_type_shape"
+      ],
+      "reads": [
+        "n|tbl|public.calendar_events",
+        "n|sch|public",
+        "n|col|public.calendar_events.type",
+        "n|col|public.calendar_events.description",
+        "n|col|public.calendar_events.location",
+        "n|col|public.calendar_events.visibility",
+        "n|col|public.calendar_events.priority",
+        "e|col|public.calendar_events.type",
+        "e|col|public.calendar_events.description",
+        "e|col|public.calendar_events.location",
+        "e|col|public.calendar_events.visibility"
+      ],
+      "sqlHash": "ee6d3422eaaa29a8"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "assignee_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "priority",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "previous_status",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "hold_reason",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "hold_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "completion_remarks",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "reject_count",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "extension_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "extension_reason",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "calendar_events_assignee_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "assignee_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "calendar_events_assignee_fk",
+        "nameExplicit": true,
+        "columns": [
+          "tenant_id",
+          "assignee_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "users",
+        "columnsTo": [
+          "tenant_id",
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "calendar_events_hold_shape",
+        "value": "(\"status\" <> 'on_hold' OR \"hold_until\" IS NOT NULL)",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "calendar_events",
+        "name": "calendar_events_reject_count",
+        "value": "\"reject_count\" >= 0",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"calendar_events\",\"calendar_events_type_valid\"]",
+      "set": {
+        "value": "\"type\" IN ('announcement', 'meeting', 'task')"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"calendar_events\",\"calendar_events_status_valid\"]",
+      "set": {
+        "value": "(\n        (\"type\" IN ('announcement', 'meeting') AND \"status\" IN ('scheduled', 'cancelled'))\n        OR (\"type\" = 'task' AND \"status\" IN (\n          'assigned', 'progress', 'on_review', 'on_hold', 'request_cancelation', 'cancelled', 'failed', 'completed'\n        ))\n      )"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"calendar_events\",\"calendar_events_type_shape\"]",
+      "set": {
+        "value": "(\n        (\"type\" = 'announcement' AND \"description\" IS NOT NULL\n          AND \"location\" IS NULL AND \"visibility\" IS NULL AND \"priority\" IS NULL)\n        OR (\"type\" = 'meeting' AND \"location\" IS NOT NULL\n          AND \"visibility\" IN ('open', 'private') AND \"priority\" IS NULL)\n        OR (\"type\" = 'task' AND \"location\" IS NULL AND \"visibility\" IS NULL\n          AND \"priority\" IN ('low', 'medium', 'high', 'urgent'))\n      )"
+      }
+    }
+  ]
+}

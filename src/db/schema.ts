@@ -669,7 +669,22 @@ export type ReportSettingsRow = typeof reportSettings.$inferSelect;
 
 /* ── Calendar (docs/calendar-plan.md) ────────────────────────────────────── */
 
-export const CALENDAR_EVENT_TYPES = ['announcement', 'meeting'] as const;
+export const CALENDAR_EVENT_TYPES = ['announcement', 'meeting', 'task'] as const;
+
+/** Stored task statuses (decision T1; `failed` and an ended hold are also derived on read, T8). */
+export const TASK_STATUSES = [
+  'assigned',
+  'progress',
+  'on_review',
+  'on_hold',
+  'request_cancelation',
+  'cancelled',
+  'failed',
+  'completed',
+] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+export const TASK_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export type CalendarEventType = (typeof CALENDAR_EVENT_TYPES)[number];
 
 /**
@@ -687,10 +702,11 @@ export const calendarEvents = pgTable.withRLS(
     type: text().notNull().$type<CalendarEventType>(),
     title: text().notNull(),
     description: text(),
+    /** Announcements and meetings: scheduled | cancelled. Tasks: a TaskStatus. */
     status: text()
       .notNull()
       .default('scheduled')
-      .$type<'scheduled' | 'cancelled'>(),
+      .$type<'scheduled' | 'cancelled' | TaskStatus>(),
     startsAt: timestamptz('starts_at').notNull(),
     endsAt: timestamptz('ends_at').notNull(),
     /** Meeting only: a room, an address or a link. */
@@ -698,6 +714,19 @@ export const calendarEvents = pgTable.withRLS(
     /** Meeting only: open (everyone) or private (creator and members). */
     visibility: text().$type<'open' | 'private'>(),
     cancelReason: text('cancel_reason'),
+    /** Task only: who does it (ends_at is its deadline). Null once that person is deleted (T6). */
+    assigneeId: uuid('assignee_id'),
+    priority: text().$type<TaskPriority>(),
+    /** Task workflow (T1): where a hold or a cancel request returns to. */
+    previousStatus: text('previous_status').$type<TaskStatus>(),
+    holdReason: text('hold_reason'),
+    holdUntil: timestamptz('hold_until'),
+    completionRemarks: text('completion_remarks'),
+    /** Times the creator sent the work back: drives "Assigned (n)". */
+    rejectCount: integer('reject_count').notNull().default(0),
+    /** A pending request for more time (one at a time). */
+    extensionUntil: timestamptz('extension_until'),
+    extensionReason: text('extension_reason'),
     /** Optimistic concurrency: an edit names the version it read. */
     version: integer().notNull().default(1),
     createdBy: uuid('created_by'),
@@ -710,6 +739,7 @@ export const calendarEvents = pgTable.withRLS(
     index('calendar_events_tenant_starts_idx').on(t.tenantId, t.startsAt),
     index('calendar_events_tenant_ends_idx').on(t.tenantId, t.endsAt),
     index('calendar_events_created_by_idx').on(t.createdBy),
+    index('calendar_events_assignee_idx').on(t.tenantId, t.assigneeId),
     // Target for same-company foreign keys from members and the log.
     uniqueIndex('calendar_events_tenant_id_id_key').on(t.tenantId, t.id),
     // The migration writes ON DELETE SET NULL ("created_by") / ("deleted_by"): a deleted person's events stay.
@@ -723,13 +753,24 @@ export const calendarEvents = pgTable.withRLS(
       columns: [t.tenantId, t.deletedBy],
       foreignColumns: [users.tenantId, users.id],
     }).onDelete('set null'),
+    // ON DELETE SET NULL ("assignee_id"); a trigger first hands open tasks back to their creator (T6).
+    foreignKey({
+      name: 'calendar_events_assignee_fk',
+      columns: [t.tenantId, t.assigneeId],
+      foreignColumns: [users.tenantId, users.id],
+    }).onDelete('set null'),
     check(
       'calendar_events_type_valid',
-      sql`${t.type} IN ('announcement', 'meeting')`,
+      sql`${t.type} IN ('announcement', 'meeting', 'task')`,
     ),
     check(
       'calendar_events_status_valid',
-      sql`${t.status} IN ('scheduled', 'cancelled')`,
+      sql`(
+        (${t.type} IN ('announcement', 'meeting') AND ${t.status} IN ('scheduled', 'cancelled'))
+        OR (${t.type} = 'task' AND ${t.status} IN (
+          'assigned', 'progress', 'on_review', 'on_hold', 'request_cancelation', 'cancelled', 'failed', 'completed'
+        ))
+      )`,
     ),
     check(
       'calendar_events_title_not_blank',
@@ -741,11 +782,19 @@ export const calendarEvents = pgTable.withRLS(
       'calendar_events_type_shape',
       sql`(
         (${t.type} = 'announcement' AND ${t.description} IS NOT NULL
-          AND ${t.location} IS NULL AND ${t.visibility} IS NULL)
+          AND ${t.location} IS NULL AND ${t.visibility} IS NULL AND ${t.priority} IS NULL)
         OR (${t.type} = 'meeting' AND ${t.location} IS NOT NULL
-          AND ${t.visibility} IN ('open', 'private'))
+          AND ${t.visibility} IN ('open', 'private') AND ${t.priority} IS NULL)
+        OR (${t.type} = 'task' AND ${t.location} IS NULL AND ${t.visibility} IS NULL
+          AND ${t.priority} IN ('low', 'medium', 'high', 'urgent'))
       )`,
     ),
+    // A hold always has an end; workflow fields belong to tasks only.
+    check(
+      'calendar_events_hold_shape',
+      sql`(${t.status} <> 'on_hold' OR ${t.holdUntil} IS NOT NULL)`,
+    ),
+    check('calendar_events_reject_count', sql`${t.rejectCount} >= 0`),
     tenantIsolation(t.tenantId),
   ],
 );

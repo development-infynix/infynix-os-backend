@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { sql, type SQL } from 'drizzle-orm';
 import type { TenantTx } from '../db/tenant-db.js';
-import type { CalendarEventType } from '../db/schema.js';
+import type { CalendarEventType, TaskPriority, TaskStatus } from '../db/schema.js';
 import { DEFAULT_REPORTS_TIMEZONE } from '../reports/reports.repository.js';
 
 /** An event as the repository reads it. Timestamps are ISO strings. */
@@ -10,7 +10,8 @@ export interface CalendarEventView {
   type: CalendarEventType;
   title: string;
   description: string | null;
-  status: 'scheduled' | 'cancelled';
+  /** Announcements and meetings: scheduled | cancelled. Tasks: the stored TaskStatus. */
+  status: 'scheduled' | 'cancelled' | TaskStatus;
   startsAt: string;
   endsAt: string;
   location: string | null;
@@ -25,6 +26,18 @@ export interface CalendarEventView {
   members: { id: string; fullName: string }[];
   /** Whether the viewer is an invitee. */
   isMember: boolean;
+  /* ---- Task only (null / 0 for other types) ---- */
+  assigneeId: string | null;
+  assigneeName: string | null;
+  assigneeRole: 'owner' | 'manager' | 'staff' | null;
+  priority: TaskPriority | null;
+  previousStatus: TaskStatus | null;
+  holdReason: string | null;
+  holdUntil: string | null;
+  completionRemarks: string | null;
+  rejectCount: number;
+  extensionUntil: string | null;
+  extensionReason: string | null;
 }
 
 export interface CalendarPerson {
@@ -41,6 +54,35 @@ export interface NewCalendarEvent {
   endsAt: Date;
   location: string | null;
   visibility: 'open' | 'private' | null;
+  /** Task only. */
+  assigneeId?: string | null;
+  priority?: TaskPriority | null;
+}
+
+/** A task column and its new value (null clears it). */
+export type TaskColumn =
+  | 'title'
+  | 'description'
+  | 'status'
+  | 'ends_at'
+  | 'assignee_id'
+  | 'priority'
+  | 'previous_status'
+  | 'hold_reason'
+  | 'hold_until'
+  | 'cancel_reason'
+  | 'completion_remarks'
+  | 'reject_count'
+  | 'extension_until'
+  | 'extension_reason';
+export type TaskPatch = Partial<Record<TaskColumn, string | number | Date | null>>;
+
+export interface LogEntry {
+  action: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  reason?: string | null;
+  meta?: Record<string, unknown>;
 }
 
 export interface CalendarEventPatch {
@@ -84,6 +126,12 @@ const visibleTo = (me: string, owner: boolean) => sql`(
   e.deleted_at is null
   and (
     e.type = 'announcement'
+    -- Tasks (T2, T3): the owner sees all; everyone else what they created or were given.
+    or (e.type = 'task' and (
+      ${owner}
+      or e.created_by = ${me}::uuid
+      or e.assignee_id = ${me}::uuid
+    ))
     or (e.type = 'meeting' and (
       ${owner}
       or e.visibility = 'open'
@@ -115,11 +163,37 @@ const eventColumns = (me: string) => sql`
       from calendar_meeting_members m join users mu on mu.id = m.user_id
      where m.event_id = e.id
   ), '[]'::json) as members,
-  exists (select 1 from calendar_meeting_members m where m.event_id = e.id and m.user_id = ${me}::uuid) as "isMember"`;
+  exists (select 1 from calendar_meeting_members m where m.event_id = e.id and m.user_id = ${me}::uuid) as "isMember",
+  e.assignee_id as "assigneeId",
+  au.full_name as "assigneeName",
+  au.role as "assigneeRole",
+  e.priority,
+  e.previous_status as "previousStatus",
+  e.hold_reason as "holdReason",
+  ${iso(sql`e.hold_until`)} as "holdUntil",
+  e.completion_remarks as "completionRemarks",
+  e.reject_count as "rejectCount",
+  ${iso(sql`e.extension_until`)} as "extensionUntil",
+  e.extension_reason as "extensionReason"`;
+
+const eventJoins = sql`
+  left join users cu on cu.id = e.created_by
+  left join users au on au.id = e.assignee_id`;
+
+/** Who a task may be assigned to by this person (T3, T4). */
+const assignScope = (assign?: { me: string; role: 'owner' | 'manager' | 'staff' }) => {
+  if (!assign || assign.role === 'owner') return sql``;
+  if (assign.role === 'manager') return sql`and (u.id = ${assign.me}::uuid or u.role = 'staff')`;
+  return sql`and u.id = ${assign.me}::uuid`;
+};
 
 @Injectable()
 export class CalendarRepository {
-  /** Events overlapping [from, to) the viewer can see, earliest first, at most `cap`. */
+  /**
+   * Events in [from, to) the viewer can see, earliest first, at most `cap`:
+   * announcements and meetings that overlap it, tasks whose deadline falls in
+   * it (a task shows on its deadline day, T8).
+   */
   async list(
     tx: TenantTx,
     me: string,
@@ -130,12 +204,17 @@ export class CalendarRepository {
   ): Promise<CalendarEventView[]> {
     const result = await tx.execute<CalendarEventView>(sql`
       select ${eventColumns(me)}
-        from calendar_events e
-        left join users cu on cu.id = e.created_by
+        from calendar_events e ${eventJoins}
        where ${visibleTo(me, owner)}
-         and e.starts_at < ${to.toISOString()}::timestamptz
-         and e.ends_at > ${from.toISOString()}::timestamptz
-       order by e.starts_at, e.id
+         and (
+           (e.type = 'task'
+             and e.ends_at >= ${from.toISOString()}::timestamptz
+             and e.ends_at < ${to.toISOString()}::timestamptz)
+           or (e.type <> 'task'
+             and e.starts_at < ${to.toISOString()}::timestamptz
+             and e.ends_at > ${from.toISOString()}::timestamptz)
+         )
+       order by case when e.type = 'task' then e.ends_at else e.starts_at end, e.id
        limit ${cap}`);
     return result.rows;
   }
@@ -149,8 +228,7 @@ export class CalendarRepository {
   ): Promise<CalendarEventView | null> {
     const result = await tx.execute<CalendarEventView>(sql`
       select ${eventColumns(me)}
-        from calendar_events e
-        left join users cu on cu.id = e.created_by
+        from calendar_events e ${eventJoins}
        where e.id = ${id}::uuid and ${visibleTo(me, owner)}`);
     return result.rows[0] ?? null;
   }
@@ -170,11 +248,14 @@ export class CalendarRepository {
   ): Promise<{ id: string; validMembers: number }> {
     const result = await tx.execute<{ id: string; validMembers: number }>(sql`
       with e as (
-        insert into calendar_events (tenant_id, type, title, description, starts_at, ends_at, location, visibility, created_by)
+        insert into calendar_events (tenant_id, type, title, description, status, starts_at, ends_at,
+                                     location, visibility, assignee_id, priority, created_by)
         values (
           ${tenantId}::uuid, ${event.type}, ${event.title}, ${event.description},
+          ${event.type === 'task' ? 'assigned' : 'scheduled'},
           ${event.startsAt.toISOString()}::timestamptz, ${event.endsAt.toISOString()}::timestamptz,
-          ${event.location}, ${event.visibility}, ${me}::uuid
+          ${event.location}, ${event.visibility}, ${event.assigneeId ?? null}::uuid, ${event.priority ?? null},
+          ${me}::uuid
         )
         returning id, tenant_id, status
       ),
@@ -308,6 +389,56 @@ export class CalendarRepository {
     return result.rows.length > 0;
   }
 
+  /**
+   * One task change (an edit or a workflow step) against the version that was
+   * read, with its log entry, in one statement. False when the version was
+   * stale or the task is gone.
+   */
+  async updateTask(
+    tx: TenantTx,
+    me: string,
+    id: string,
+    version: number,
+    patch: TaskPatch,
+    log: LogEntry,
+  ): Promise<boolean> {
+    const sets: SQL[] = [sql`version = version + 1`, sql`updated_at = now()`];
+    for (const [column, value] of Object.entries(patch) as [TaskColumn, TaskPatch[TaskColumn]][]) {
+      const v = value instanceof Date ? value.toISOString() : value;
+      const cast =
+        column === 'ends_at' || column === 'hold_until' || column === 'extension_until'
+          ? sql`::timestamptz`
+          : column === 'assignee_id'
+            ? sql`::uuid`
+            : column === 'reject_count'
+              ? sql`::int`
+              : sql``;
+      sets.push(sql`${sql.identifier(column)} = ${v}${cast}`);
+    }
+    const result = await tx.execute<{ id: string }>(sql`
+      with e as (
+        update calendar_events set ${sql.join(sets, sql`, `)}
+         where id = ${id}::uuid and version = ${version} and type = 'task' and deleted_at is null
+        returning id, tenant_id
+      ),
+      l as (
+        insert into calendar_event_log (tenant_id, event_id, actor_id, action, from_status, to_status, reason, meta)
+        select e.tenant_id, e.id, ${me}::uuid, ${log.action}, ${log.fromStatus ?? null}, ${log.toStatus ?? null},
+               ${log.reason ?? null}, ${JSON.stringify(log.meta ?? {})}::jsonb
+          from e
+      )
+      select id from e`);
+    return result.rows.length > 0;
+  }
+
+  /** Whether `userId` is an active person in the company who can open the Calendar, and their role. */
+  async assignable(tx: TenantTx, userId: string): Promise<{ role: 'owner' | 'manager' | 'staff' } | null> {
+    const result = await tx.execute<{ role: 'owner' | 'manager' | 'staff' }>(sql`
+      select u.role from users u
+       where u.id = ${userId}::uuid and u.is_active and ${canOpenCalendar(sql`u`)}`);
+    return result.rows[0] ?? null;
+  }
+
   /** Soft delete (the log keeps the event), and logs it. */
   async remove(tx: TenantTx, me: string, id: string): Promise<boolean> {
     const result = await tx.execute<{ id: string }>(sql`
@@ -336,10 +467,16 @@ export class CalendarRepository {
   }
 
   /** People who can be invited: name or email matches, prefix matches first, at most `limit`. */
+  /**
+   * People who can open the Calendar, for the invite picker; with `assign`,
+   * narrowed to whom the viewer may give a task (T3, T4): the owner anyone,
+   * a manager staff or themselves, staff only themselves.
+   */
   async people(
     tx: TenantTx,
     query: string,
     limit: number,
+    assign?: { me: string; role: 'owner' | 'manager' | 'staff' },
   ): Promise<CalendarPerson[]> {
     const term = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
     const match = term
@@ -348,7 +485,7 @@ export class CalendarRepository {
     const result = await tx.execute<CalendarPerson>(sql`
       select u.id, u.full_name as "fullName", u.role
         from users u
-       where u.is_active and ${canOpenCalendar(sql`u`)} ${match}
+       where u.is_active and ${canOpenCalendar(sql`u`)} ${match} ${assignScope(assign)}
        order by case when u.full_name ilike ${`${term}%`} then 0 else 1 end, lower(u.full_name), u.id
        limit ${limit}`);
     return result.rows;

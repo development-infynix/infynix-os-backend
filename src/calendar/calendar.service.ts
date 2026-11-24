@@ -17,6 +17,18 @@ import {
   type CreateCalendarEventDto,
 } from './dto/create-calendar-event.dto.js';
 import type { UpdateCalendarEventDto } from './dto/update-calendar-event.dto.js';
+import type { TaskStatus } from '../db/schema.js';
+import {
+  allowedActions,
+  applyStep,
+  buildTaskEdit,
+  canDeleteTask,
+  canEditTask,
+  managesTask,
+  type AllowedAction,
+  type Viewer,
+} from './task-rules.js';
+import { taskStatusAt } from './task-workflow.js';
 
 /** The longest range one list request may cover (a month view's six weeks fit). */
 export const MAX_RANGE_DAYS = 62;
@@ -31,12 +43,48 @@ export interface CalendarPermissions {
   canCancel: boolean;
   canRestore: boolean;
   canDelete: boolean;
+  /** Task only: the workflow steps the viewer may take now (T7). Empty for other types. */
+  actions: AllowedAction[];
 }
+
+/** Fields only tasks take; announcements and meetings reject them. */
+const TASK_ONLY_FIELDS = [
+  'deadline',
+  'assigneeId',
+  'priority',
+  'holdReason',
+  'holdUntil',
+  'cancelReason',
+  'completionRemarks',
+  'note',
+  'extensionUntil',
+  'extensionReason',
+] as const;
+/** Fields tasks never take. */
+const NON_TASK_FIELDS = ['startsAt', 'durationMinutes', 'location', 'visibility', 'memberIds', 'reason'] as const;
+/** Inputs of workflow steps (not editable fields). */
+const STEP_FIELDS = [
+  'holdReason',
+  'holdUntil',
+  'cancelReason',
+  'completionRemarks',
+  'note',
+  'extensionUntil',
+  'extensionReason',
+] as const;
+
+const viewerOf = (actor: Actor): Viewer => ({ id: actor.user.id, role: actor.user.role as Viewer['role'] });
+const given = (dto: object, keys: readonly string[]) =>
+  keys.filter((key) => (dto as Record<string, unknown>)[key] !== undefined);
 
 /** An event as the API returns it: the stored row plus its derived status and the viewer's permissions. */
 export type PublicCalendarEvent = Omit<CalendarEventView, 'isMember'> & {
-  /** Derived from the time window on every read (no background job, decision C6). */
-  effectiveStatus: DerivedStatus;
+  /**
+   * Derived on every read (no background job): announcements and meetings
+   * from their time window (C6); tasks from the stored status, with failed and
+   * an ended hold worked out from the clock (T8).
+   */
+  effectiveStatus: DerivedStatus | TaskStatus;
   isMember: boolean;
   permissions: CalendarPermissions;
 };
@@ -92,6 +140,18 @@ function permissionsFor(
     canCancel: manage && (status === 'upcoming' || status === 'live'),
     canRestore: manage && restorable(event, status, now),
     canDelete: manage && status !== 'live',
+    actions: [],
+  };
+}
+
+function taskPermissions(task: CalendarEventView, actor: Actor, now = Date.now()): CalendarPermissions {
+  const viewer = viewerOf(actor);
+  return {
+    canEdit: canEditTask(task, viewer, now),
+    canCancel: false,
+    canRestore: false,
+    canDelete: canDeleteTask(task, viewer, now),
+    actions: allowedActions(task, viewer, now),
   };
 }
 
@@ -161,6 +221,12 @@ export class CalendarService {
   ): Promise<PublicCalendarEvent> {
     const title = dto.title.trim();
     if (!title) throw new BadRequestException('Give it a title.');
+    if (dto.type === 'task') return this.createTask(actor, dto, title);
+    const wrong = given(dto, ['deadline', 'assigneeId', 'priority']);
+    if (wrong.length) throw new BadRequestException(`Only tasks take ${wrong.join(', ')}.`);
+    if (dto.startsAt === undefined || dto.durationMinutes === undefined) {
+      throw new BadRequestException('Give it a start and a length.');
+    }
     const startsAt = parseInstant(dto.startsAt, 'startsAt');
     const endsAt = new Date(startsAt.getTime() + dto.durationMinutes * 60_000);
     const description = trimmedOrNull(dto.description);
@@ -221,6 +287,89 @@ export class CalendarService {
     return this.present(created, actor);
   }
 
+  /** T1, T3, T4: a task starts now, is due at its deadline, and goes to someone the creator may assign. */
+  private async createTask(actor: Actor, dto: CreateCalendarEventDto, title: string) {
+    const wrong = given(dto, ['startsAt', 'durationMinutes', 'location', 'visibility', 'memberIds']);
+    if (wrong.length) throw new BadRequestException(`Tasks don't take ${wrong.join(', ')}.`);
+    if (!dto.deadline) throw new BadRequestException('Set a deadline.');
+    const deadline = parseInstant(dto.deadline, 'deadline');
+    const startsAt = new Date();
+    if (deadline.getTime() <= startsAt.getTime() + 1000) {
+      throw new BadRequestException('The deadline must be in the future.');
+    }
+    const assigneeId = dto.assigneeId ?? actor.user.id;
+    const created = await this.tenantDb.run(actor.tenant.id, async (tx) => {
+      await this.assertAssignable(tx, actor, assigneeId);
+      const { id } = await this.calendar.create(
+        tx,
+        actor.tenant.id,
+        actor.user.id,
+        {
+          type: 'task',
+          title,
+          description: trimmedOrNull(dto.description),
+          startsAt,
+          endsAt: deadline,
+          location: null,
+          visibility: null,
+          assigneeId,
+          priority: dto.priority ?? 'medium',
+        },
+        [],
+      );
+      return this.mustFind(tx, actor, id);
+    });
+    return this.present(created, actor);
+  }
+
+  /**
+   * T3, T4: staff assign only to themselves; managers to staff or themselves;
+   * the owner to anyone. Everyone assigned must be active and able to open
+   * the Calendar.
+   */
+  private async assertAssignable(tx: TenantTx, actor: Actor, assigneeId: string) {
+    const role = actor.user.role;
+    if (assigneeId !== actor.user.id && role === 'staff') {
+      throw new ForbiddenException('You can only assign tasks to yourself.');
+    }
+    const person = await this.calendar.assignable(tx, assigneeId);
+    if (!person) throw new BadRequestException('That person is inactive or can’t open the Calendar.');
+    if (assigneeId !== actor.user.id && role === 'manager' && person.role !== 'staff') {
+      throw new ForbiddenException('Managers can assign tasks to staff or themselves.');
+    }
+  }
+
+  /** A task change: one workflow step (`action`), or an edit of its fields. */
+  private async updateTask(tx: TenantTx, actor: Actor, task: CalendarEventView, dto: UpdateCalendarEventDto) {
+    const wrong = given(dto, NON_TASK_FIELDS);
+    if (wrong.length) throw new BadRequestException(`Tasks don't take ${wrong.join(', ')}.`);
+    const viewer = viewerOf(actor);
+    let change;
+    if (dto.action !== undefined) {
+      const extra = given(dto, ['title', 'description', 'assigneeId', 'priority']);
+      if (extra.length) throw new BadRequestException('A step can’t also edit the task.');
+      change = applyStep(task, viewer, dto.action, dto);
+    } else {
+      const steps = given(dto, STEP_FIELDS);
+      if (steps.length) throw new BadRequestException(`${steps.join(', ')} only go with a step.`);
+      if (!canEditTask(task, viewer)) {
+        throw new ForbiddenException(
+          managesTask(task, viewer)
+            ? `This task is ${taskStatusAt(task).replace('_', ' ')}, so it can't be edited.`
+            : "You can't edit this task.",
+        );
+      }
+      if (dto.assigneeId !== undefined && dto.assigneeId !== task.assigneeId) {
+        await this.assertAssignable(tx, actor, dto.assigneeId);
+      }
+      change = buildTaskEdit(task, dto);
+    }
+    if (!(await this.calendar.updateTask(tx, actor.user.id, task.id, dto.version, change.patch, change.log))) {
+      this.conflict(await this.mustFind(tx, actor, task.id), actor);
+    }
+    return this.mustFind(tx, actor, task.id);
+  }
+
   async update(
     actor: Actor,
     id: string,
@@ -234,9 +383,15 @@ export class CalendarService {
         id,
       );
       if (!event) throw new NotFoundException('Calendar event not found.');
+      if (event.version !== dto.version) this.conflict(event, actor);
+      if (event.type === 'task') return this.updateTask(tx, actor, event, dto);
+      const taskOnly = given(dto, TASK_ONLY_FIELDS);
+      if (taskOnly.length) throw new BadRequestException(`Only tasks take ${taskOnly.join(', ')}.`);
+      if (dto.action !== undefined && dto.action !== 'cancel' && dto.action !== 'restore') {
+        throw new BadRequestException(`${dto.action} is a task step.`);
+      }
       const status = deriveStatus(event);
       const permissions = permissionsFor(event, actor, status);
-      if (event.version !== dto.version) this.conflict(event, actor);
 
       if (dto.action === 'cancel') {
         const extra = Object.entries(dto).filter(
@@ -332,6 +487,17 @@ export class CalendarService {
         id,
       );
       if (!event) throw new NotFoundException('Calendar event not found.');
+      if (event.type === 'task') {
+        if (!canDeleteTask(event, viewerOf(actor))) {
+          throw new ForbiddenException(
+            event.createdBy === actor.user.id
+              ? 'A task can be deleted while it’s assigned or cancelled. Cancel it first.'
+              : 'Only the person who created this task, or the owner, can delete it.',
+          );
+        }
+        await this.calendar.remove(tx, actor.user.id, id);
+        return;
+      }
       if (!permissionsFor(event, actor, deriveStatus(event)).canDelete) {
         throw new ForbiddenException(
           !canManage(event, actor)
@@ -346,9 +512,14 @@ export class CalendarService {
   }
 
   /** People who can be invited to a meeting (they can open the Calendar). */
-  async people(actor: Actor, query: string, limit: number) {
+  async people(actor: Actor, query: string, limit: number, assign = false) {
     const items = await this.tenantDb.run(actor.tenant.id, (tx) =>
-      this.calendar.people(tx, query, limit),
+      this.calendar.people(
+        tx,
+        query,
+        limit,
+        assign ? { me: actor.user.id, role: viewerOf(actor).role } : undefined,
+      ),
     );
     return { items };
   }
@@ -465,11 +636,14 @@ export class CalendarService {
     actor: Actor,
     now = Date.now(),
   ): PublicCalendarEvent {
+    if (row.type === 'task') {
+      return { ...row, effectiveStatus: taskStatusAt(row, now), permissions: taskPermissions(row, actor, now) };
+    }
     const effectiveStatus = deriveStatus(row, now);
     return {
       ...row,
       effectiveStatus,
-      permissions: permissionsFor(row, actor, effectiveStatus),
+      permissions: permissionsFor(row, actor, effectiveStatus, now),
     };
   }
 }

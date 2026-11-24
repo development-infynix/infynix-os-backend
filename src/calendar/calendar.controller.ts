@@ -53,6 +53,7 @@ export class CalendarController {
     @CurrentActor() actor: Actor,
     @Query('q') q?: string,
     @Query('limit') limit?: string,
+    @Query('for') purpose?: string,
   ) {
     const parsed = limit === undefined || limit === '' ? 20 : Number(limit);
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
@@ -60,7 +61,10 @@ export class CalendarController {
         'Limit must be a whole number from 1 to 50.',
       );
     }
-    return this.calendar.people(actor, (q ?? '').trim().slice(0, 100), parsed);
+    if (purpose !== undefined && purpose !== 'assign' && purpose !== 'invite') {
+      throw new BadRequestException("for must be 'invite' or 'assign'.");
+    }
+    return this.calendar.people(actor, (q ?? '').trim().slice(0, 100), parsed, purpose === 'assign');
   }
 
   @Get(':id')
