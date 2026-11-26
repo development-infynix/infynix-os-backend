@@ -3,7 +3,7 @@ import { isUniqueViolation } from '../db/errors.js';
 import { TenantDb, type TenantTx } from '../db/tenant-db.js';
 import type { Actor } from '../tenancy/tenancy.types.js';
 import { CrmTransferRepository } from './crm-transfer.repository.js';
-import { CrmRepository } from './crm.repository.js';
+import { CrmRepository, type DealScope } from './crm.repository.js';
 import type { DeleteDealsDto, TransferDealsDto } from './dto/crm-transfer.dto.js';
 
 /**
@@ -22,7 +22,7 @@ export class CrmTransferService {
   dealIds(actor: Actor, pipelineId: string, stageIds: string[]): Promise<{ ids: string[] }> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       await this.assertCanSee(tx, actor, pipelineId);
-      return { ids: await this.transfer.dealIdsByStages(tx, pipelineId, stageIds) };
+      return { ids: await this.transfer.dealIdsByStages(tx, pipelineId, stageIds, this.dealScope(actor)) };
     });
   }
 
@@ -59,6 +59,7 @@ export class CrmTransferService {
           targetPipelineId: dto.targetPipelineId,
           targetStageId: dto.targetStageId,
           dealIds,
+          scope: this.dealScope(actor),
         };
         const result =
           dto.mode === 'move'
@@ -88,7 +89,6 @@ export class CrmTransferService {
     }
   }
 
-  /** Owners see every pipeline; everyone else only those they're on (404 otherwise, so nothing leaks). */
   /**
    * One chunk of the board's Select › Delete. Deals that are gone already, or
    * in a pipeline the person can't see, are counted as missing, not errors.
@@ -105,6 +105,12 @@ export class CrmTransferService {
     });
   }
 
+  /** The Owner moves any deal; managers and staff only their own (see DealScope). */
+  private dealScope(actor: Actor): DealScope {
+    return actor.user.role === 'owner' ? null : actor.user.id;
+  }
+
+  /** Owners see every pipeline; everyone else only those they're on (404 otherwise, so nothing leaks). */
   private async assertCanSee(tx: TenantTx, actor: Actor, pipelineId: string): Promise<void> {
     const visible =
       actor.user.role === 'owner'

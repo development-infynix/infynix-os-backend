@@ -228,8 +228,13 @@ describe('CRM deal transfer: Move and Add', { timeout: 90_000 }, () => {
     ).rejects.toThrow('already in this pipeline');
   });
 
-  it('Select › Delete removes only deals in pipelines the person can see', async () => {
+  it('Select › Delete removes only deals the person owns, in pipelines they can see', async () => {
     const mine = await deals(source.id, source.s1, 3, 'del');
+    // A owns the first two; the third stays unassigned, so staff can't see it.
+    await db
+      .update(crmDeals)
+      .set({ ownerId: ids.a, assignmentSource: 'manual' })
+      .where(inArray(crmDeals.id, [mine[0].id, mine[1].id]));
     // A pipeline staff member A isn't on.
     const [hidden] = await db.insert(crmPipelines).values({ tenantId, name: `Hidden ${tag}` }).returning({ id: crmPipelines.id });
     const [hiddenStage] = await db
@@ -239,8 +244,8 @@ describe('CRM deal transfer: Move and Add', { timeout: 90_000 }, () => {
     const [secret] = await deals(hidden.id, hiddenStage.id, 1, 'hid');
     const staffA = { user: { id: ids.a, role: 'staff', tenantId }, tenant: { id: tenantId } } as unknown as Actor;
 
-    const result = await service.deleteMany(staffA, { dealIds: [mine[0].id, mine[1].id, secret.id] });
-    expect(result).toEqual({ deleted: 2, missing: 1 });
+    const result = await service.deleteMany(staffA, { dealIds: [mine[0].id, mine[1].id, mine[2].id, secret.id] });
+    expect(result).toEqual({ deleted: 2, missing: 2 });
     expect((await inStage(source.s1)).map((d) => d.id)).toEqual([mine[2].id]);
     expect(await inStage(hiddenStage.id)).toHaveLength(1);
 

@@ -95,8 +95,12 @@ const deal = (overrides: Partial<CrmDeal> = {}): CrmDeal => ({
   createdBy: 'u1',
   createdAt: new Date(),
   updatedAt: new Date(),
+  ownerId: null,
   ...overrides,
 });
+
+/** A stage's deals in board order, as `dealIdsInStage` returns them. */
+const rows = (...ids: string[]) => ids.map((id) => ({ id, ownerId: null }));
 
 /** A pipeline as the picker gets it. */
 const summary = () => ({
@@ -333,17 +337,7 @@ describe('CrmService', () => {
   });
 
   it('refuses the same client twice in one pipeline', async () => {
-    findDealByClient.mockResolvedValue({
-      id: 'd1',
-      tenantId: 't1',
-      pipelineId: 'p1',
-      stageId: 's1',
-      clientId: 'c1',
-      position: 0,
-      createdBy: 'u1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    findDealByClient.mockResolvedValue(deal());
 
     await expect(
       service.createDeal(actor, { pipelineId: 'p1', clientId: 'c1' }),
@@ -360,17 +354,7 @@ describe('CrmService', () => {
 
   it('refuses a stage that belongs to another pipeline', async () => {
     findStage.mockResolvedValue(stage({ id: 's2', pipelineId: 'p2' }));
-    findDeal.mockResolvedValue({
-      id: 'd1',
-      tenantId: 't1',
-      pipelineId: 'p1',
-      stageId: 's1',
-      clientId: 'c1',
-      position: 0,
-      createdBy: 'u1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    findDeal.mockResolvedValue(deal());
 
     await expect(
       service.moveDeal(actor, 'd1', { stageId: 's2' }),
@@ -382,8 +366,8 @@ describe('CrmService', () => {
     findDeal.mockResolvedValue(deal());
     findStage.mockResolvedValue(stage({ id: 's2', name: 'Qualified', position: 1 }));
     dealIdsInStage
-      .mockResolvedValueOnce(['d2', 'd3'])
-      .mockResolvedValueOnce(['d4']);
+      .mockResolvedValueOnce(rows('d2', 'd3'))
+      .mockResolvedValueOnce(rows('d4'));
     dealCard.mockResolvedValue(card({ stageId: 's2', position: 1 }));
 
     await service.moveDeal(actor, 'd1', { stageId: 's2', position: 1 });
@@ -402,7 +386,7 @@ describe('CrmService', () => {
       .mockResolvedValueOnce(deal({ stageId: 's1' }))
       .mockResolvedValueOnce(deal({ stageId: 's3' }));
     findStage.mockResolvedValue(stage({ id: 's2', name: 'Qualified', position: 1 }));
-    dealIdsInStage.mockResolvedValueOnce(['d2']).mockResolvedValueOnce(['d5']);
+    dealIdsInStage.mockResolvedValueOnce(rows('d2')).mockResolvedValueOnce(rows('d5'));
 
     await service.moveDeal(actor, 'd1', { stageId: 's2', position: 0 });
 
@@ -430,7 +414,7 @@ describe('CrmService', () => {
 
     const result = await service.stageDeals(actor, 's1', 100, 100);
 
-    expect(dealCardsForStage).toHaveBeenCalledWith(tx, 's1', 100, 100);
+    expect(dealCardsForStage).toHaveBeenCalledWith(tx, 's1', 100, 100, null);
     expect(result.items.map((item) => item.id)).toEqual(['d101']);
     expect(result.total).toBe(101);
   });
@@ -512,7 +496,7 @@ describe('CrmService', () => {
 
     const result = await service.board(actor, 'p1', 100);
 
-    expect(boardColumns).toHaveBeenCalledWith(tx, 'p1', 100);
+    expect(boardColumns).toHaveBeenCalledWith(tx, 'p1', 100, null);
     expect(result.stages.map((s) => s.id)).toEqual(['s1', 's2']);
     expect(result.totals).toEqual({ s1: 140, s2: 0 });
     expect(result.columns.s1.map((c) => c.id)).toEqual(['d1']);
@@ -520,17 +504,7 @@ describe('CrmService', () => {
 
   it('reports pipelines, stages and deals outside your access as not found', async () => {
     isPipelineMember.mockResolvedValue(false);
-    findDeal.mockResolvedValue({
-      id: 'd1',
-      tenantId: 't1',
-      pipelineId: 'p1',
-      stageId: 's1',
-      clientId: 'c1',
-      position: 0,
-      createdBy: 'u1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    findDeal.mockResolvedValue(deal());
 
     await expect(service.board(staff, 'p1', 100)).rejects.toBeInstanceOf(NotFoundException);
     expect(boardColumns).not.toHaveBeenCalled();
@@ -548,6 +522,68 @@ describe('CrmService', () => {
     expect(placeDeals).not.toHaveBeenCalled();
     expect(removeDeal).not.toHaveBeenCalled();
     expect(addExistingClients).not.toHaveBeenCalled();
+  });
+
+  /* ── Own deals only (managers and staff) ─────────────────────────────── */
+
+  it("scopes the board, columns and search to the person's own deals", async () => {
+    const manager: Actor = { ...staff, user: { ...staff.user, id: 'u3', role: 'manager' } };
+    dealIdsInStage.mockResolvedValue([]);
+
+    await service.board(staff, 'p1', 100);
+    expect(boardColumns).toHaveBeenLastCalledWith(tx, 'p1', 100, 'u2');
+    await service.board(manager, 'p1', 100);
+    expect(boardColumns).toHaveBeenLastCalledWith(tx, 'p1', 100, 'u3');
+
+    await service.stageDeals(staff, 's1', 0, 100);
+    expect(dealCardsForStage).toHaveBeenCalledWith(tx, 's1', 100, 0, 'u2');
+    expect(countDealsInStage).toHaveBeenCalledWith(tx, 's1', 'u2');
+
+    const searchDeals = vi.fn().mockResolvedValue([]);
+    (service as unknown as { crm: Record<string, unknown> }).crm.searchDeals = searchDeals;
+    await service.searchDeals(staff, 'p1', 'acme', 20);
+    expect(searchDeals).toHaveBeenCalledWith(tx, 'p1', 'acme', 20, 'u2');
+  });
+
+  it('hides deals owned by someone else, or by no one, from managers and staff', async () => {
+    for (const ownerId of ['u3', null]) {
+      dealCard.mockResolvedValue(card({ ownerId }));
+      findDeal.mockResolvedValue(deal({ ownerId }));
+      await expect(service.getDeal(staff, 'd1')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.moveDeal(staff, 'd1', { stageId: 's1' })).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.deleteDeal(staff, 'd1')).rejects.toBeInstanceOf(NotFoundException);
+    }
+    expect(placeDeals).not.toHaveBeenCalled();
+    expect(removeDeal).not.toHaveBeenCalled();
+
+    dealCard.mockResolvedValue(card({ ownerId: 'u2' }));
+    await expect(service.getDeal(staff, 'd1')).resolves.toMatchObject({ id: 'd1' });
+  });
+
+  it('reports a deal given to someone else while the move waited as not found', async () => {
+    findDeal.mockResolvedValueOnce(deal({ ownerId: 'u2' })).mockResolvedValueOnce(deal({ ownerId: 'u3' }));
+
+    await expect(service.moveDeal(staff, 'd1', { stageId: 's1' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(placeDeals).not.toHaveBeenCalled();
+  });
+
+  it('drops a scoped card relative to the cards that person sees', async () => {
+    findDeal.mockResolvedValue(deal({ ownerId: 'u2' }));
+    findStage.mockResolvedValue(stage({ id: 's2', name: 'Qualified', position: 1 }));
+    const target = [
+      { id: 'a', ownerId: 'u2' },
+      { id: 'x', ownerId: 'u3' },
+      { id: 'b', ownerId: 'u2' },
+    ];
+    dealIdsInStage.mockResolvedValue(target);
+
+    // Second of the cards they see (before b), with x left where it was.
+    await service.moveDeal(staff, 'd1', { stageId: 's2', position: 1 });
+    expect(placeDeals).toHaveBeenNthCalledWith(1, tx, 's2', ['a', 'x', 'd1', 'b']);
+
+    placeDeals.mockClear();
+    await service.moveDeal(staff, 'd1', { stageId: 's2', position: 2 });
+    expect(placeDeals).toHaveBeenNthCalledWith(1, tx, 's2', ['a', 'x', 'b', 'd1']);
   });
 
   it('keeps managers off pipelines they are not on: shaping routes answer not found too', async () => {

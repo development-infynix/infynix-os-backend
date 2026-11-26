@@ -44,7 +44,8 @@ crm_pipelines ──< crm_deals >── owner_id
 | D10 | **Bulk tools run 500 deals per request**, each request one SQL statement under the pipeline lock, looping until nothing remains, with progress (see [performance.md](performance.md)). |
 | D11 | **Who can change things:** for now, the existing CRM `manage` check (Owner and managers, in pipelines they can see). Everyone with pipeline access can read the drawer. Fine-grained rights come later from System settings. |
 | D12 | **Owner on deals:** each deal card and the deal drawer show the owner; the drawer lets a manager or Owner pick or clear it by hand (source `manual`). |
-| D13 | **Not in this version:** an assignment history log (the reference's WI-1b); staff seeing only their own deals; a "don't assign to managers" filter. |
+| D13 | **Not in this version:** an assignment history log (the reference's WI-1b); a "don't assign to managers" filter. |
+| D14 | **Deal visibility (2026-11-26):** managers and staff see only deals they own. See [Deal visibility](#deal-visibility). |
 
 ---
 
@@ -188,3 +189,13 @@ Code: `frontend/src/crm/components/assign/` (`AssignDealsDrawer`, `AccessUsersTa
 - [ ] The deal card and drawer show the owner; picking one in the drawer sets the source to manual.
 - [ ] The drawer can't be closed while a tool runs, and confirming a rule inside it doesn't close it.
 - [ ] Staff see the drawer read-only and get 403 from every write.
+
+## Deal visibility
+
+Added 2026-11-26. The company **Owner** sees every deal. **Managers and staff** see only deals whose `owner_id` is themselves, in pipelines they're on. Unassigned deals and other people's deals are hidden from them.
+
+- **Where it applies:** the board (cards and column totals), loading more cards in a column, search, opening a deal, moving it, deleting it, Select › Delete, and the transfer tools (Select whole stage, Move, Add to another pipeline). A deal outside someone's scope answers 404, like a pipeline they aren't on.
+- **Where it doesn't:** the Assign deals drawer keeps showing pipeline-wide counts, and its tools (Share, Give, Unassign, Transfer, the manual owner pick) still work on the whole pipeline for the Owner and managers. Deleting a pipeline still deletes all its deals, and the delete confirmation counts all of them.
+- **Dragging:** a scoped person's drop position counts only the cards they see. The card goes just before their card at that index, or to the end of the stage. Cards they can't see keep their places.
+- **Side effect:** a deal someone adds goes to whoever the pipeline's rule picks. Under Manual, or Round robin when it's someone else's turn, the deal leaves the person's board on the next refresh.
+- **Code:** `DealScope` in `src/crm/crm.repository.ts` (null for the Owner, otherwise the person's id), used by `CrmService` and `CrmTransferService`.

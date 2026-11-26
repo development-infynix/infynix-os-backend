@@ -55,7 +55,21 @@ export interface CrmDeal {
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+  ownerId: string | null;
 }
+
+/**
+ * Whose deals a query may see: null for the company Owner (every deal), or a
+ * manager's or staff member's own id (only deals they own).
+ */
+export type DealScope = string | null;
+
+/** Drizzle filter for a deal scope; undefined (no filter) for the Owner. */
+const ownedBy = (scope: DealScope) => (scope === null ? undefined : eq(crmDeals.ownerId, scope));
+
+/** Raw-SQL filter for a deal scope, for `alias.owner_id`. */
+export const ownedBySql = (alias: string, scope: DealScope): SQL =>
+  scope === null ? sql`` : sql`and ${sql.raw(alias)}.owner_id = ${scope}`;
 
 /** Someone who can be given pipeline access: active, not the owner, with the `crm` grant. */
 export interface CrmEligibleUser {
@@ -120,6 +134,7 @@ const dealColumns = {
   createdBy: crmDeals.createdBy,
   createdAt: crmDeals.createdAt,
   updatedAt: crmDeals.updatedAt,
+  ownerId: crmDeals.ownerId,
 };
 
 const dealCardColumns = {
@@ -372,11 +387,12 @@ export class CrmRepository {
       .then(() => undefined);
   }
 
-  countDealsInStage(tx: TenantTx, stageId: string): Promise<number> {
+  /** Deals in a stage; with a scope, only that person's. Unscoped for the delete-stage check. */
+  countDealsInStage(tx: TenantTx, stageId: string, scope: DealScope = null): Promise<number> {
     return tx
       .select({ total: count() })
       .from(crmDeals)
-      .where(eq(crmDeals.stageId, stageId))
+      .where(and(eq(crmDeals.stageId, stageId), ownedBy(scope)))
       .then(([{ total }]) => total);
   }
 
@@ -412,10 +428,10 @@ export class CrmRepository {
     return row ?? null;
   }
 
-  /** A stage's deal ids in board order, for re-indexing after a move. */
-  async dealIdsInStage(tx: TenantTx, stageId: string): Promise<string[]> {
-    const rows = await tx
-      .select({ id: crmDeals.id })
+  /** A stage's deals (every owner) in board order, for re-indexing after a move. */
+  dealIdsInStage(tx: TenantTx, stageId: string): Promise<{ id: string; ownerId: string | null }[]> {
+    return tx
+      .select({ id: crmDeals.id, ownerId: crmDeals.ownerId })
       .from(crmDeals)
       .where(eq(crmDeals.stageId, stageId))
       .orderBy(
@@ -423,7 +439,6 @@ export class CrmRepository {
         desc(crmDeals.createdAt),
         desc(crmDeals.id),
       );
-    return rows.map((row) => row.id);
   }
 
   /**
@@ -645,6 +660,7 @@ export class CrmRepository {
     tx: TenantTx,
     pipelineId: string,
     limit: number,
+    scope: DealScope = null,
   ): Promise<{
     stages: CrmStage[];
     columns: Record<string, CrmDealCard[]>;
@@ -682,7 +698,7 @@ export class CrmRepository {
              ${iso(sql`c.created_at`)} as added_at
       from ${crmPipelineStages} s
       cross join lateral (
-        select count(*)::int as total from ${crmDeals} d where d.stage_id = s.id
+        select count(*)::int as total from ${crmDeals} d where d.stage_id = s.id ${ownedBySql('d', scope)}
       ) t
       left join lateral (
         select d.id, d.client_id, d.position, d.created_at,
@@ -691,7 +707,7 @@ export class CrmRepository {
         from ${crmDeals} d
         join ${clients} cl on cl.id = d.client_id and cl.tenant_id = d.tenant_id
         left join ${users} ow on ow.id = d.owner_id
-        where d.stage_id = s.id
+        where d.stage_id = s.id ${ownedBySql('d', scope)}
         order by d.position asc, d.created_at desc, d.id desc
         limit ${limit}
       ) c on true
@@ -745,6 +761,7 @@ export class CrmRepository {
     stageId: string,
     limit: number,
     offset = 0,
+    scope: DealScope = null,
   ): Promise<CrmDealCard[]> {
     return tx
       .select(dealCardColumns)
@@ -754,7 +771,7 @@ export class CrmRepository {
         and(eq(clients.id, crmDeals.clientId), eq(clients.tenantId, crmDeals.tenantId)),
       )
       .leftJoin(users, eq(users.id, crmDeals.ownerId))
-      .where(eq(crmDeals.stageId, stageId))
+      .where(and(eq(crmDeals.stageId, stageId), ownedBy(scope)))
       .orderBy(
         asc(crmDeals.position),
         desc(crmDeals.createdAt),
@@ -800,6 +817,7 @@ export class CrmRepository {
     pipelineId: string,
     q: string,
     limit: number,
+    scope: DealScope = null,
   ): Promise<CrmDealCard[]> {
     const term = q.replace(/[\\%_]/g, (ch) => `\\${ch}`);
     const contains = `%${term}%`;
@@ -816,7 +834,7 @@ export class CrmRepository {
         and(eq(clients.id, crmDeals.clientId), eq(clients.tenantId, crmDeals.tenantId)),
       )
       .leftJoin(users, eq(users.id, crmDeals.ownerId))
-      .where(and(eq(crmDeals.pipelineId, pipelineId), search))
+      .where(and(eq(crmDeals.pipelineId, pipelineId), search, ownedBy(scope)))
       .orderBy(desc(crmDeals.createdAt), desc(crmDeals.id))
       .limit(limit);
   }

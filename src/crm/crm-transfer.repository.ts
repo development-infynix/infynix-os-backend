@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { clients, crmDeals, crmPipelineStages, crmPipelineUsers, crmPipelines } from '../db/schema.js';
 import type { TenantTx } from '../db/tenant-db.js';
 import { eligibleOwners } from './crm-assignment.repository.js';
+import { type DealScope, ownedBySql } from './crm.repository.js';
 
 /** Deals per transfer request (see docs/performance.md). */
 export const TRANSFER_CHUNK = 500;
@@ -34,7 +35,12 @@ export class CrmTransferRepository {
    * Every deal in the given stages of one pipeline, in board order (stage,
    * then position), not only the cards loaded on the board.
    */
-  async dealIdsByStages(tx: TenantTx, pipelineId: string, stageIds: string[]): Promise<string[]> {
+  async dealIdsByStages(
+    tx: TenantTx,
+    pipelineId: string,
+    stageIds: string[],
+    scope: DealScope = null,
+  ): Promise<string[]> {
     if (!stageIds.length) return [];
     const result = await tx.execute<{ id: string }>(sql`
       select d.id
@@ -42,6 +48,7 @@ export class CrmTransferRepository {
         join ${crmPipelineStages} s on s.id = d.stage_id
        where d.pipeline_id = ${pipelineId}
          and d.stage_id = any(${uuidArray(stageIds)})
+         ${ownedBySql('d', scope)}
        order by s.position asc, s.id asc, d.position asc, d.created_at desc, d.id desc
     `);
     return result.rows.map((row) => row.id);
@@ -81,7 +88,14 @@ export class CrmTransferRepository {
    */
   async move(
     tx: TenantTx,
-    data: { sourcePipelineId: string; targetPipelineId: string; targetStageId?: string; dealIds: string[] },
+    data: {
+      sourcePipelineId: string;
+      targetPipelineId: string;
+      targetStageId?: string;
+      dealIds: string[];
+      /** Only these deals may be taken (see DealScope); others count as missing. */
+      scope: DealScope;
+    },
   ): Promise<MoveResult> {
     const chosenStage = data.targetStageId ? sql`and s.id = ${data.targetStageId}` : sql``;
     const result = await tx.execute<{
@@ -105,6 +119,7 @@ export class CrmTransferRepository {
         select d.id, d.client_id, d.stage_id, d.position, d.created_at
           from ${crmDeals} d
          where d.id = any(${uuidArray(data.dealIds)}) and d.pipeline_id = ${data.sourcePipelineId}
+           ${ownedBySql('d', data.scope)}
          for update
       ),
       ordered as (
@@ -196,6 +211,7 @@ export class CrmTransferRepository {
       targetStageId?: string;
       dealIds: string[];
       createdBy: string;
+      scope: DealScope;
     },
   ): Promise<{ stageFound: boolean; found: number; added: number; unassigned: number; skipped: MoveResult['skipped'] }> {
     const chosenStage = data.targetStageId ? sql`and s.id = ${data.targetStageId}` : sql``;
@@ -220,6 +236,7 @@ export class CrmTransferRepository {
         select d.id, d.client_id, d.stage_id, d.position, d.created_at
           from ${crmDeals} d
          where d.id = any(${uuidArray(data.dealIds)}) and d.pipeline_id = ${data.sourcePipelineId}
+           ${ownedBySql('d', data.scope)}
       ),
       ordered as (
         select r.id, r.client_id,
@@ -295,14 +312,14 @@ export class CrmTransferRepository {
   }
 
   /**
-   * Deletes the given deals in one statement, only those in pipelines the
-   * person can see (the Owner sees every pipeline; anyone else, the ones
-   * they're on). Returns how many went.
+   * Deletes the given deals in one statement, only those the person can see:
+   * the Owner every deal; anyone else, deals they own in pipelines they're on.
+   * Returns how many went.
    */
   async deleteMany(tx: TenantTx, data: { dealIds: string[]; userId: string; isOwner: boolean }): Promise<number> {
     const visible = data.isOwner
       ? sql`true`
-      : sql`exists (
+      : sql`d.owner_id = ${data.userId} and exists (
           select 1 from ${crmPipelineUsers} u where u.pipeline_id = d.pipeline_id and u.user_id = ${data.userId}
         )`;
     const result = await tx.execute<{ deleted: number }>(sql`

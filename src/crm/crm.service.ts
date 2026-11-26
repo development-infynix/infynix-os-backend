@@ -14,6 +14,7 @@ import {
   type CrmEligibleUser,
   type CrmPipeline,
   type CrmStage,
+  type DealScope,
   CrmRepository,
 } from './crm.repository.js';
 import type {
@@ -303,7 +304,12 @@ export class CrmService {
   async board(actor: Actor, pipelineId: string, limit: number) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const pipeline = await this.findPipelineOrFail(tx, actor, pipelineId);
-      const { stages, columns, totals } = await this.crm.boardColumns(tx, pipelineId, limit);
+      const { stages, columns, totals } = await this.crm.boardColumns(
+        tx,
+        pipelineId,
+        limit,
+        this.dealScope(actor),
+      );
       return {
         pipeline: toPipelineResponse(pipeline, stages),
         stages: stages.map(toStageResponse),
@@ -321,9 +327,10 @@ export class CrmService {
   async stageDeals(actor: Actor, stageId: string, offset: number, limit: number) {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       await this.findStageOrFail(tx, actor, stageId);
+      const scope = this.dealScope(actor);
       const [items, total] = await Promise.all([
-        this.crm.dealCardsForStage(tx, stageId, limit, offset),
-        this.crm.countDealsInStage(tx, stageId),
+        this.crm.dealCardsForStage(tx, stageId, limit, offset, scope),
+        this.crm.countDealsInStage(tx, stageId, scope),
       ]);
       return { items, total };
     });
@@ -332,7 +339,7 @@ export class CrmService {
   async getDeal(actor: Actor, id: string): Promise<CrmDealCard> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const card = await this.crm.dealCard(tx, id);
-      if (!card || !(await this.canSee(tx, actor, card.pipelineId))) {
+      if (!card || !(await this.canSeeDeal(tx, actor, card))) {
         throw new NotFoundException('Deal not found');
       }
       return card;
@@ -345,7 +352,9 @@ export class CrmService {
       await this.findPipelineOrFail(tx, actor, pipelineId);
       const term = q.trim();
       if (!term) return { items: [] };
-      return { items: await this.crm.searchDeals(tx, pipelineId, term, limit) };
+      return {
+        items: await this.crm.searchDeals(tx, pipelineId, term, limit, this.dealScope(actor)),
+      };
     });
   }
 
@@ -442,7 +451,7 @@ export class CrmService {
   ): Promise<CrmDealCard> {
     return this.tenantDb.run(actor.tenant.id, async (tx) => {
       const found = await this.crm.findDeal(tx, id);
-      if (!found || !(await this.canSee(tx, actor, found.pipelineId))) {
+      if (!found || !(await this.canSeeDeal(tx, actor, found))) {
         throw new NotFoundException('Deal not found');
       }
       // Moves in one pipeline queue up here. Without the lock, two quick moves
@@ -451,7 +460,8 @@ export class CrmService {
       // while we waited may have changed its stage, or deleted it.
       await this.crm.lockPipeline(tx, found.pipelineId);
       const deal = await this.crm.findDeal(tx, id);
-      if (!deal) throw new NotFoundException('Deal not found');
+      // Gone, or given to someone else while we waited.
+      if (!deal || !this.inScope(actor, deal)) throw new NotFoundException('Deal not found');
       const stage = await this.crm.findStage(tx, dto.stageId);
       if (!stage || stage.pipelineId !== deal.pipelineId) {
         throw new BadRequestException('Stage does not belong to this pipeline');
@@ -459,18 +469,15 @@ export class CrmService {
       const sourceStageId = deal.stageId;
       // Re-index both stages so positions stay unique and match the board,
       // instead of leaving several cards on the same position.
-      const targetIds = (
-        await this.crm.dealIdsInStage(tx, stage.id)
-      ).filter((dealId) => dealId !== id);
-      const index = Math.min(
-        Math.max(dto.position ?? targetIds.length, 0),
-        targetIds.length,
+      const target = (await this.crm.dealIdsInStage(tx, stage.id)).filter(
+        (row) => row.id !== id,
       );
-      targetIds.splice(index, 0, id);
+      const targetIds = target.map((row) => row.id);
+      targetIds.splice(this.dropIndex(actor, target, dto.position), 0, id);
       await this.crm.placeDeals(tx, stage.id, targetIds);
       if (sourceStageId !== stage.id) {
-        const sourceIds = await this.crm.dealIdsInStage(tx, sourceStageId);
-        await this.crm.placeDeals(tx, sourceStageId, sourceIds);
+        const source = await this.crm.dealIdsInStage(tx, sourceStageId);
+        await this.crm.placeDeals(tx, sourceStageId, source.map((row) => row.id));
       }
       const card = await this.crm.dealCard(tx, id);
       if (!card) throw new NotFoundException('Deal not found');
@@ -482,7 +489,7 @@ export class CrmService {
   async deleteDeal(actor: Actor, id: string): Promise<void> {
     await this.tenantDb.run(actor.tenant.id, async (tx) => {
       const deal = await this.crm.findDeal(tx, id);
-      if (!deal || !(await this.canSee(tx, actor, deal.pipelineId))) {
+      if (!deal || !(await this.canSeeDeal(tx, actor, deal))) {
         throw new NotFoundException('Deal not found');
       }
       await this.crm.removeDeal(tx, id);
@@ -577,6 +584,49 @@ export class CrmService {
   /** Null for owners (they see every pipeline), otherwise the person's own id. */
   private memberId(actor: Actor): string | null {
     return actor.user.role === 'owner' ? null : actor.user.id;
+  }
+
+  /**
+   * Whose deals this person sees: the Owner every deal, managers and staff only
+   * the deals they own (not unassigned ones, not other people's).
+   */
+  private dealScope(actor: Actor): DealScope {
+    return this.memberId(actor);
+  }
+
+  private inScope(actor: Actor, deal: { ownerId: string | null }): boolean {
+    const scope = this.dealScope(actor);
+    return scope === null || deal.ownerId === scope;
+  }
+
+  /** A deal is visible if it's in scope and its pipeline is too. */
+  private async canSeeDeal(
+    tx: TenantTx,
+    actor: Actor,
+    deal: { pipelineId: string; ownerId: string | null },
+  ): Promise<boolean> {
+    if (!this.inScope(actor, deal)) return false;
+    return this.canSee(tx, actor, deal.pipelineId);
+  }
+
+  /**
+   * Where a moved card goes in the stage's full order. `position` counts the
+   * cards this person sees, so for a scoped person it lands just before their
+   * card at that index (or at the end of the stage), leaving cards they
+   * can't see in place.
+   */
+  private dropIndex(
+    actor: Actor,
+    stage: { id: string; ownerId: string | null }[],
+    position: number | undefined,
+  ): number {
+    const scope = this.dealScope(actor);
+    const visible =
+      scope === null
+        ? stage.map((_, index) => index)
+        : stage.flatMap((row, index) => (row.ownerId === scope ? [index] : []));
+    const at = Math.min(Math.max(position ?? visible.length, 0), visible.length);
+    return at < visible.length ? visible[at] : stage.length;
   }
 
   /** Pipeline access: owners always; everyone else needs a membership row. */

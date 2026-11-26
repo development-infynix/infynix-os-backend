@@ -152,7 +152,7 @@ Permissions, the activity log, payment actions and qualification actions were de
 | # | Question | Decision |
 |---|---|---|
 | 1 | Manager powers | Managers manage pipelines, stages, access lists and assignment in pipelines they're on (the CRM `manage` check). Finer rights come with permissions in phase 2. |
-| 2 | Staff visibility | Staff see every deal in their pipelines, as in the reference. "Only my deals" may come later. |
+| 2 | Staff visibility | **Changed 2026-11-26:** managers and staff see only the deals they own, inside the pipelines they're on (not unassigned deals, not other people's). The Owner sees every deal. See [user-deals-assignment.md](user-deals-assignment.md#deal-visibility). |
 | 3 | Client activity log | Not built. To revisit with the activity log in phase 2. |
 | 4 | IDs | `uuid`, done. |
 | 5 | Duplicate clients | One client per email or phone per company (database-enforced); the same person may be a client of other companies. |
