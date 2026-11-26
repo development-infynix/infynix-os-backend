@@ -20,12 +20,13 @@ What is built and how it works is in **[calendar-module.md](calendar-module.md)*
 | # | Decision |
 |---|---|
 | C1 | **Announcements are created** by the owner and managers. Staff only read them. |
+| C1a | **Announcements and meetings can't start in the past** (2026-11-26): created or moved only to a start at or after the current minute. The same goes for task dates: deadlines, hold ends and proposed deadlines must be in the future. |
 | C2 | **Announcements are managed** (edit, cancel, delete) by their creator and the owner. |
 | C3 | **Meetings:** anyone with the Calendar menu can create one. The creator manages their own, and the **owner has every right the creator has, on every meeting**: sees private meetings in full (invited or not), edits, cancels, deletes, changes open/private. Otherwise a **private** meeting is visible only to its creator and invitees; an **open** one to everyone. Managers, staff and invitees only view others' meetings. Invitees exist only for private meetings. (Revised twice on 2026-11-24; an "owner sees only an outline" version was built and dropped.) |
 | C4 | **Deleted members:** their events stay, shown as "Deleted user" (`created_by` set to null, column-level, never `tenant_id`); their invitations are removed. The owner can still manage those events. |
 | C5 | **Timezone:** days follow the company timezone (read from the Reports timezone setting for now, default `Asia/Kolkata`). |
 | C6 | **Upcoming / live / ended** are derived from the time, on the server on every read and in the browser on the exact second. **No background job** for Calendar. |
-| C7 | **No notifications** in Phases 1–2; they arrive with Phase 3. |
+| C7 | **No notifications** in Phases 1–2; they arrive in Phase 4. |
 | C8 | **Deleting** is for the creator and the owner. |
 | C9 | **What can be done, by status** (creator and owner): **upcoming** → edit (the Status field can cancel) and delete; **live** → cancel only, and that's final (its start has passed, so no restore; afterwards only delete); **ended** → delete; **cancelled** → delete, plus edit and restore to upcoming while its start time is still ahead. Upcoming cancels and restores happen in edit mode's Status field; a live cancel is a footer button with a confirmation. |
 
@@ -52,7 +53,7 @@ Reference: the ERP task workflow (`explorewings/docs/calendar-module.md` §1, `e
 - One menu check per request (`CalendarPolicy`); the invite picker and the server only accept people in the company who can open the Calendar.
 - About 4–5 database round trips per request; writes save the event, invitees and log entry in one statement.
 
-## Phase 3: notifications and push (design agreed, not built)
+## Phase 4: notifications and push (design agreed, not built)
 
 - **Action-triggered** notifications (invited, meeting changed or cancelled, announcement posted; remarks on reports): written in the same transaction as the change; the push is sent after commit. No job.
 - **Clock-triggered** notifications ("starts in 10 minutes", "today's report not filed" at the due time, later task deadlines): a `scheduled_notifications` table (company, due time, kind, target) written when events are created or changed. An in-process timer (`@nestjs/schedule`, one instance via `@nestjs/locks`) sleeps until the earliest due row, sends, and re-arms; on startup it catches up and drops reminders that no longer make sense. Idle nights cost nothing on the Neon free tier.
@@ -64,3 +65,16 @@ Reference: the ERP task workflow (`explorewings/docs/calendar-module.md` §1, `e
 1. **Announcements while live:** they follow C9, so a multi-day announcement can't be edited while running (only cancelled). Keep, or allow edits?
 2. **Background refresh:** the page refetches other people's changes every 5 minutes (plus on tab focus and the Refresh button). 15 minutes would let the free-tier database sleep more.
 3. **Shared company timezone:** move the timezone from Reports settings to a company-level setting both modules read.
+
+## CCode fixes (2026-11-26)
+
+A review of the built module against this plan and [calendar-module.md](calendar-module.md) found the inconsistencies below. All are fixed; none changes a decision.
+
+| # | Change | Why | Where |
+|---|---|---|---|
+| F1 | **Invitees only on private meetings, enforced by the server.** Creating an open meeting with a non-empty `memberIds` is a 400. On edit the rule follows the visibility after the change: switching to open drops the invitees, new ones on an open meeting are rejected, and `members` is logged only when rows were actually removed. An empty `memberIds: []` stays accepted, because the form sends it on every open-meeting submit. | C3 says invitees exist only for private meetings, but the server checked only their eligibility — the rule lived in the web form alone. | `src/calendar/calendar.service.ts` (create and `buildPatch`); case "lets only a private meeting have invitees" in `test/calendar.e2e-spec.ts`; e2e count in [calendar-module.md](calendar-module.md). |
+| F2 | **No false promise when editing a live event.** The 403 now reads "This … is live, so it can't be edited. Cancelling it now is final; once it ends, it can only be deleted." | C9 allows no edit after the start, so "it can be changed again once it ends" pointed at an action that never exists. | `src/calendar/calendar.service.ts` (edit denial); message assertion in the live case of `test/calendar.e2e-spec.ts`. |
+| F3 | **Phase numbers corrected:** C7 and the notifications section now say Phase 4, and the activity-log UI is Phase 5. | Tasks took Phase 3, so the plan contradicted its own phase table. | This file (C7, "Phase 4: notifications and push"); [calendar-module.md](calendar-module.md) (activity log). |
+| F4 | **A month switch keeps the selected day:** ‹ month › selects the same date in the new month, clamped (31 Jan → 28 Feb, 29 in a leap year), and the grid's range — so the server query — follows the month. | The selected date, and with it the day panel, stayed in the old month while the grid moved. | `frontend/src/lib/calendar.ts` (`dateInMonth`); `frontend/src/calendar/pages/CalendarPage.tsx` (`switchMonth`); described in [calendar-module.md](calendar-module.md). |
+
+**Verified:** backend lint, build, `tsc --noEmit` over source and tests, and the 70 unit tests pass; the frontend typechecks and lints, and `dateInMonth` was checked on its month-end and leap-year boundaries. **E2e (2026-11-26):** all 19 pass (8 calendar, 11 tasks). The first run caught one case that F1 had made out of date: the owner-rights case switched a private meeting to open and back, then expected the invitee to get a 403. F1 now drops invitees on the switch to open, so the ex-invitee got a 404. The case now re-invites them when switching back and asserts that the open meeting has no members.

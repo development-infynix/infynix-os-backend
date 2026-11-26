@@ -36,19 +36,22 @@ The owner has every right the creator has, on every event (C3). The menu grant i
 | **Cancelled, before its start** | ✅ | ✅ | restore to upcoming (Status field) |
 | **Cancelled, after its start** | ❌ | ✅ | — |
 
+Editing a live event is a 403 that says so plainly: cancelling it now is final, and once it ends it can only be deleted.
+
 Status is never stored as upcoming, live or ended: the row stores `scheduled | cancelled` and the rest is derived from `starts_at` / `ends_at`, on the server on every read and in the browser on the exact second (C6). There is no background job.
 
 ## Rules
 
+- **No past starts:** an announcement or meeting **can't start in the past**: on create, or when an edit moves its start, the start must be at or after the current minute (400 otherwise). The form blocks earlier dates and times; a new event defaults to its usual time on the picked day (announcement 09:00–18:00, meeting 10:00–10:30), or to now if that has passed.
 - **Time:** an event runs from `starts_at` to `ends_at` (1 minute to 62 days). The form takes wall-clock dates and times in the **company timezone** (C5) and sends instants; days in the grid are grouped in that zone. An event ending exactly at midnight doesn't spill into the next day.
 - **Announcement:** title and text required; no place, visibility or invitees.
-- **Meeting:** title, place and visibility required; agenda optional. Invitees only for **private** meetings (an open meeting is saved with none). The creator is always part of their meeting and is never stored as an invitee.
+- **Meeting:** title, place and visibility required; agenda optional. Invitees only for **private** meetings, enforced by the server: creating an open meeting with invitees is a 400 (an empty list is fine); an edit follows the visibility after the change, so switching to open **drops the invitees** (logged as `members`) and adding invitees to an open meeting is a 400. Switching back to private starts with nobody invited. The creator is always part of their meeting and is never stored as an invitee.
 - **Invitees:** active people in the same company who can open the Calendar (the owner, or a `calendar` grant). The picker lists only them and the server checks again.
-- **Concurrency:** every write names the `version` it read; a stale one is a 409 with the latest copy.
+- **Concurrency:** edits, cancels, restores and task steps name the `version` they read; a stale one is a 409 with the latest copy. Delete takes no version: it is allowed or refused on the event as it stands.
 - **Cancel:** optional reason (up to 1000 characters); the event stays on the calendar, marked cancelled.
 - **Delete:** soft (`deleted_at`), so the activity log keeps the event.
 - **Deleted members (C4):** their events stay with no creator ("Deleted user") and stay manageable by the owner; their invitations are removed.
-- **Activity log:** every create, edit, cancel, restore and delete writes `calendar_event_log` (actor, action, status move, reason, changed fields). Not shown in the UI yet (Phase 4).
+- **Activity log:** every create, edit, cancel, restore and delete writes `calendar_event_log` (actor, action, status move, reason, changed fields). Not shown in the UI yet (Phase 5).
 
 ## Status codes
 
@@ -57,11 +60,11 @@ Status is never stored as upcoming, live or ended: the row stores `scheduled | c
 | Missing, deleted, other company, or a private meeting you can't see | 404 |
 | Visible but not allowed (wrong role, or not allowed in its status) | 403 |
 | Stale `version` | 409, with `current` |
-| Validation (missing place, bad time range, more than 62 days, invitee not allowed, staff posting an announcement…) | 400 / 403 |
+| Validation (missing place, bad time range, more than 62 days, invitee not allowed, invitees on an open meeting, staff posting an announcement…) | 400 / 403 |
 
 ## Data
 
-`calendar_events`: id (uuid), tenant_id, type (`announcement | meeting`), title, description, status (`scheduled | cancelled`), starts_at, ends_at, location, visibility (`open | private`), cancel_reason, version, created_by, deleted_at, deleted_by, created_at, updated_at. Checks: valid type and status, non-blank title, `ends_at > starts_at`, and each type carries exactly its own fields.
+`calendar_events`: id (uuid), tenant_id, type (`announcement | meeting | task`), title, description, status (`scheduled | cancelled` for announcements and meetings; tasks below), starts_at, ends_at, location, visibility (`open | private`), cancel_reason, version, created_by, deleted_at, deleted_by, created_at, updated_at. Checks: valid type and status, non-blank title, `ends_at > starts_at`, and each type carries exactly its own fields.
 
 `calendar_meeting_members`: (tenant_id, event_id, user_id) primary key; deleting the event or the person removes the row.
 
@@ -77,21 +80,21 @@ All three use `tenant_isolation` RLS, are granted to `infynix_tenant`, and refer
 | `GET /calendar/context` | `{ timezone, today }` for the company. |
 | `GET /calendar/people?q&limit` | Invite picker: people who can open the Calendar; `q` matches name or email; limit 1–50, default 20. |
 | `GET /calendar/:id` | One event; 404 when not visible. |
-| `POST /calendar` | `{ type, title, description?, startsAt, durationMinutes, location?, visibility?, memberIds? }`. |
+| `POST /calendar` | `{ type, title, description?, startsAt, durationMinutes, location?, visibility?, memberIds? }`; `memberIds` must be empty or absent unless `visibility` is `private`. |
 | `PATCH /calendar/:id` | `{ version, ...fields }` to edit; `{ version, action: 'cancel', reason? }`; `{ version, action: 'restore' }`. |
 | `DELETE /calendar/:id` | Soft delete. |
 
-An event in every response: `{ id, type, title, description, status, effectiveStatus, startsAt, endsAt, location, visibility, members: [{ id, fullName }], isMember, cancelReason, version, createdBy, createdByName, createdAt, updatedAt, permissions: { canEdit, canCancel, canRestore, canDelete } }`.
+An event in every response: `{ id, type, title, description, status, effectiveStatus, startsAt, endsAt, location, visibility, members: [{ id, fullName }], isMember, cancelReason, version, createdBy, createdByName, createdAt, updatedAt, permissions: { canEdit, canCancel, canRestore, canDelete, actions } }` (`actions` is empty except on tasks).
 
 Round trips: begin, tenant setup, one or two statements of work, commit. Writes save the event, invitees and log entry in one statement (CTE) and read the result back once.
 
-Tested against the real database in `test/calendar.e2e-spec.ts` (7 cases: announcements, private-meeting visibility and owner rights, live cancel, cancel/restore/delete, no restore after the start, invite rules, deleted members).
+Tested against the real database in `test/calendar.e2e-spec.ts` (8 cases, all passing on 2026-11-26: announcements, private-meeting visibility and owner rights, live cancel, cancel/restore/delete, no restore after the start, invite rules, invitees only on private meetings, deleted members).
 
 ## Frontend
 
 `frontend/src/calendar/`, route `/_authed/calendar` with `month`, `date` and `event` in the URL.
 
-- **Desktop (lg+):** the selected day on the left (Refresh, **New event**, and a panel with a fixed date header listing the day's events) and the month on the right (Today, ‹ month ›).
+- **Desktop (lg+):** the selected day on the left (Refresh, **New event**, and a panel with a fixed date header listing the day's events) and the month on the right (Today, ‹ month ›). A month switch keeps the selected day: the same date in the new month (`dateInMonth` in `frontend/src/lib/calendar.ts`, clamped, so 31 Jan becomes 28 Feb, or 29 in a leap year), and the server query follows the new month's grid.
 - **Below lg (ERP D11):** one header row (month switcher, Today, Refresh, ＋) and the month; tapping a day opens a drawer titled "Events" with that day's list.
 - **Month grid** (`components/MonthCalendar.tsx`, shared): today as a green number tile, the selected day on the green wash, arrow-key navigation; each day shows up to **three dots** in its bottom-right corner (green live, ink upcoming, muted ended or cancelled), then "+".
 - **Day list:** raised cards (type, private lock, status tag, title, times, place, host, invitee count for private meetings). An empty day shows an illustration that starts a meeting, and **Create ▾**.
@@ -132,6 +135,8 @@ Self-assigned tasks skip review and cancel requests: start, then **Complete**; h
 
 **Editing (T7).** Creator or owner, while assigned, in progress, on hold or failed (not in review: send it back first). Title, details, deadline, priority, assignee. Reassigning starts over (assigned, count 0, requests cleared); a new deadline on a failed task brings it back to assigned.
 
+**No past dates.** A deadline (on create, edit, extend, approve or reopen), a hold end and a proposed deadline must all be in the future; the server refuses the rest with a 400. The forms block past dates and times, and a new task is due at 18:00 on the picked day (today if that day has passed, or in an hour when it's already after 18:00).
+
 **Deleting (T5).** The creator while assigned or cancelled; the owner at any time.
 
 **Deleted assignee (T6).** A database trigger (`users_return_calendar_tasks`) hands their open tasks back to the creator as assigned and logs `reassigned`; finished ones keep no assignee ("Deleted user").
@@ -142,7 +147,7 @@ Self-assigned tasks skip review and cancel requests: start, then **Complete**; h
 
 **Data.** Task columns on `calendar_events`: assignee_id (composite FK, `ON DELETE SET NULL ("assignee_id")`), priority, previous_status, hold_reason, hold_until, completion_remarks, reject_count, extension_until, extension_reason. Checks keep task statuses and fields to tasks, and a hold always has an end. Migrations: `calendar_tasks` (with the T6 trigger) and `calendar_tasks_trigger_fix` (skips the hand-back while the company or the creator is being deleted).
 
-Tested in `test/calendar-tasks.e2e-spec.ts` (11 cases, including deleting a whole company with open tasks).
+Tested in `test/calendar-tasks.e2e-spec.ts` (11 cases, all passing on 2026-11-26, including deleting a whole company with open tasks).
 
 ## Deploying
 

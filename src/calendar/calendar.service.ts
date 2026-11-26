@@ -155,6 +155,17 @@ function taskPermissions(task: CalendarEventView, actor: Actor, now = Date.now()
   };
 }
 
+/**
+ * Announcements and meetings can't start in the past. Times are picked to the
+ * minute, so the current minute still counts (10:57 is fine at 10:57:40).
+ */
+function assertStartNotPast(type: 'announcement' | 'meeting', startsAt: Date) {
+  const minute = Math.floor(Date.now() / 60_000) * 60_000;
+  if (startsAt.getTime() < minute) {
+    throw new BadRequestException(`A ${type} can’t start in the past.`);
+  }
+}
+
 function parseInstant(value: string, field: string): Date {
   const date = new Date(value);
   if (Number.isNaN(date.getTime()))
@@ -228,6 +239,7 @@ export class CalendarService {
       throw new BadRequestException('Give it a start and a length.');
     }
     const startsAt = parseInstant(dto.startsAt, 'startsAt');
+    assertStartNotPast(dto.type, startsAt);
     const endsAt = new Date(startsAt.getTime() + dto.durationMinutes * 60_000);
     const description = trimmedOrNull(dto.description);
 
@@ -261,8 +273,18 @@ export class CalendarService {
           'Choose whether the meeting is open or private.',
         );
       visibility = dto.visibility;
-      // The creator is always part of their meeting; they're never stored as a member.
-      memberIds = (dto.memberIds ?? []).filter((id) => id !== actor.user.id);
+      const invited = dto.memberIds ?? [];
+      if (visibility === 'open' && invited.length > 0) {
+        throw new BadRequestException(
+          'An open meeting has no invitees. Make it private to invite people.',
+        );
+      }
+      // Invitees belong to private meetings only (docs/calendar-plan.md C3). The
+      // creator is always part of their meeting, so they're never stored as a member.
+      memberIds =
+        visibility === 'private'
+          ? invited.filter((id) => id !== actor.user.id)
+          : [];
     }
 
     const created = await this.tenantDb.run(actor.tenant.id, async (tx) => {
@@ -453,7 +475,7 @@ export class CalendarService {
           !canManage(event, actor)
             ? `You can't edit this ${event.type}.`
             : status === 'live'
-              ? `This ${event.type} is live; it can be changed again once it ends.`
+              ? `This ${event.type} is live, so it can't be edited. Cancelling it now is final; once it ends, it can only be deleted.`
               : status === 'ended'
                 ? `This ${event.type} has ended, so it can't be edited.`
                 : `This ${event.type}'s start time has passed, so it can't be edited.`,
@@ -557,6 +579,9 @@ export class CalendarService {
         );
       if (minutes > MAX_DURATION_MINUTES)
         throw new BadRequestException('An event can last at most 62 days.');
+      if (startsAt.getTime() !== Date.parse(event.startsAt)) {
+        assertStartNotPast(event.type as 'announcement' | 'meeting', startsAt);
+      }
       patch.startsAt = startsAt;
       patch.endsAt = new Date(startsAt.getTime() + minutes * 60_000);
       changed.push('time');
@@ -593,7 +618,19 @@ export class CalendarService {
         patch.visibility = dto.visibility;
         changed.push('visibility');
       }
-      if (dto.memberIds !== undefined) {
+      // An open meeting never keeps invitees: reject new ones and drop the old.
+      const openAfter = (dto.visibility ?? event.visibility) === 'open';
+      if (openAfter) {
+        if ((dto.memberIds?.length ?? 0) > 0) {
+          throw new BadRequestException(
+            'An open meeting has no invitees. Make it private to invite people.',
+          );
+        }
+        if (event.members.length > 0) {
+          memberIds = [];
+          changed.push('members');
+        }
+      } else if (dto.memberIds !== undefined) {
         memberIds = dto.memberIds.filter((id) => id !== event.createdBy);
         changed.push('members');
       }

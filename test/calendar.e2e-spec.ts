@@ -124,6 +124,19 @@ describe('calendar', { timeout: 60_000 }, () => {
       effectiveStatus: 'upcoming',
       createdByName: 'Max Manager',
     });
+    // An announcement can't start in the past, on create or when its start moves.
+    await expect(
+      service.create(manager, {
+        type: 'announcement',
+        title: 'Late',
+        description: 'Too late',
+        startsAt: inHours(-0.25),
+        durationMinutes: 60,
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.update(manager, post.id, { version: 1, startsAt: inHours(-1) }),
+    ).rejects.toMatchObject({ status: 400 });
 
     expect((await service.findOne(staff1, post.id)).permissions.canEdit).toBe(
       false,
@@ -185,9 +198,11 @@ describe('calendar', { timeout: 60_000 }, () => {
       visibility: 'open',
     });
     expect(reopened.visibility).toBe('open');
+    expect(reopened.members).toEqual([]); // open meetings keep no invitees (C3)
     await service.update(owner, meeting.id, {
       version: 2,
       visibility: 'private',
+      memberIds: [staff2.user.id],
     });
     // Only the creator and the owner change who sees it; an invitee can't.
     await expect(
@@ -199,14 +214,25 @@ describe('calendar', { timeout: 60_000 }, () => {
   });
 
   it('shows open meetings to everyone; a live one can only be cancelled, for good', async () => {
-    const live = await service.create(staff2, {
-      type: 'meeting',
+    const allHands = {
+      type: 'meeting' as const,
       title: 'All hands',
       location: 'Main hall',
-      visibility: 'open',
-      startsAt: inHours(-0.5),
+      visibility: 'open' as const,
       durationMinutes: 60,
-    });
+    };
+    // A meeting can't be created in the past, so this one is moved there in the database.
+    await expect(
+      service.create(staff2, { ...allHands, startsAt: inHours(-0.5) }),
+    ).rejects.toMatchObject({ status: 400 });
+    const created = await service.create(staff2, { ...allHands, startsAt: inHours(2) });
+    await expect(
+      service.update(staff2, created.id, { version: 1, startsAt: inHours(-1) }),
+    ).rejects.toMatchObject({ status: 400 });
+    await db.execute(
+      sql`update calendar_events set starts_at = now() - interval '30 minutes', ends_at = now() + interval '30 minutes' where id = ${created.id}`,
+    );
+    const live = await service.findOne(staff2, created.id);
     expect(live.effectiveStatus).toBe('live');
     expect(await visibleIds(staff3)).toContain(live.id);
     // Live: the creator and the owner can cancel it, nothing else.
@@ -223,7 +249,10 @@ describe('calendar', { timeout: 60_000 }, () => {
       (await service.findOne(manager, live.id)).permissions.canCancel,
     ).toBe(false);
     await expect(
-      service.update(owner, live.id, { version: 1, title: 'x' }),
+      service.update(owner, live.id, { version: 1, title: 'x' }).catch((e) => {
+        expect(e.message).toContain("is live, so it can't be edited");
+        throw e;
+      }),
     ).rejects.toMatchObject({ status: 403 });
     await expect(service.remove(owner, live.id)).rejects.toMatchObject({
       status: 403,
@@ -370,6 +399,50 @@ describe('calendar', { timeout: 60_000 }, () => {
     expect(names).toContain('Olive Owner');
     expect(names).not.toContain('Nora NoCalendar');
     expect(names).not.toContain('Otto Outside');
+  });
+
+  it('lets only a private meeting have invitees', async () => {
+    const base = {
+      type: 'meeting' as const,
+      title: 'Invitees',
+      location: 'Room 4',
+      startsAt: inHours(3),
+      durationMinutes: 30,
+    };
+    // An open meeting takes no invitees, on create or on change.
+    await expect(
+      service.create(staff1, {
+        ...base,
+        visibility: 'open',
+        memberIds: [staff2.user.id],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const priv = await service.create(staff1, {
+      ...base,
+      visibility: 'private',
+      memberIds: [staff2.user.id],
+    });
+    expect(priv.members.map((m) => m.id)).toEqual([staff2.user.id]);
+    expect((await service.findOne(staff2, priv.id)).isMember).toBe(true);
+
+    // Switching it to open drops the invitees on the server.
+    const opened = await service.update(staff1, priv.id, {
+      version: priv.version,
+      visibility: 'open',
+      memberIds: [],
+    });
+    expect(opened.members).toEqual([]);
+    expect((await service.findOne(staff2, priv.id)).isMember).toBe(false);
+
+    // And an open meeting can't be given invitees.
+    await expect(
+      service.update(staff1, opened.id, {
+        version: opened.version,
+        memberIds: [staff2.user.id],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    await service.remove(staff1, opened.id);
   });
 
   it('keeps a deleted member’s events and drops their invitations', async () => {
